@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Text Ships</title>
+<style>
+body {
+  margin:0;
+  background:#222;
+  font-family: Arial, sans-serif; /* all text Arial */
+  overflow:hidden;
+  color: white; /* default text color */
+}
+
+/* Ships */
+.ship {
+  position: absolute;
+  width: 60px;
+  height: 60px;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.ship svg {
+  filter: drop-shadow(0 0 6px rgba(255,255,255,0.5)); /* outer glow */
+}
+
+.ship polygon {
+  fill: rgba(255, 255, 255, 0.029); /* soft translucent white */
+  stroke: white;
+  stroke-width: 1.5;
+}
+
+.ship line {
+  stroke: white;
+  stroke-width: 1.5;
+}
+
+
+/* Overlay for full text */
+#overlay {
+  position:fixed;
+  top:0;
+  left:0;
+  right:0;
+  bottom:0;
+  display:none;
+  justify-content:center;
+  align-items:center;
+  background:rgba(0,0,0,0.7);
+  text-align:center;
+  padding:20px;
+  z-index:9999;
+  color:white;
+  font-family: Arial, sans-serif;
+  font-size:2em;
+}
+
+/* Input box */
+#inputBox {
+  position:fixed;
+  bottom:10px;
+  left:50%;
+  transform:translateX(-50%);
+  z-index:10000;
+  font-family: Arial, sans-serif;
+}
+
+/* Video background */
+#backgroundVideo {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: -1;
+}
+
+/* Input fields */
+#textInput, #emailInput {
+  font-family: Arial, sans-serif;
+  font-size: 14px;
+  padding: 5px 8px;
+  border: 1px solid white;
+  background: transparent;
+  color: white;
+  outline: none;
+  border-radius: 3px;
+  width: 300px;
+  resize: none; /* disables manual resize */
+  overflow: hidden; /* hide scroll */
+}
+
+/* Button style */
+#inputBox button {
+  background: transparent;
+  color: white;
+  border: 1px solid white;
+  padding: 5px 12px;
+  font-family: Arial, sans-serif;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: 0.2s;
+}
+
+#inputBox button:hover {
+  background: rgba(255,255,255,0.1);
+}
+
+/* Checkbox style */
+input[type="checkbox"] {
+  accent-color: white; /* makes the tick white */
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  vertical-align: middle;
+  margin-right: 6px;
+  background: transparent;
+  border: 1px solid white;
+}
+
+/* Checkbox label text */
+label h1 {
+  display: inline;
+  font-size: 0.8em;
+  font-weight: normal;
+  color: white;
+  margin: 0;
+  vertical-align: middle;
+}
+
+body.admin-mode {
+  outline: 2px dashed rgba(255,255,255,0.3);
+}
+</style>
+</head>
+<body>
+<video id="backgroundVideo" autoplay muted loop>
+  <source src="background.mp4" type="video/mp4">
+  Your browser does not support HTML5 video.
+</video>
+<div id="overlay"></div>
+
+<div id="inputBox">
+  <textarea id="textInput" placeholder="kirjuta oma murest" rows="1"></textarea>
+  <br>
+  <label>
+    <input type="checkbox" id="feedbackCheckbox">
+    <h1>kas soovid tagasisidet?</h1>
+  </label>
+  <br>
+  <input type="email" id="emailInput" placeholder="sisesta oma email" style="display:none; margin-top:5px;">
+  <br>
+  <button onclick="sendText()">saada</button>
+</div>
+
+<!-- Socket.io -->
+<script src="/socket.io/socket.io.js"></script>
+<!-- Bubbles logic -->
+<script src="bubbles.js"></script>
+</body>
+</html>
