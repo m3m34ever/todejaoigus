@@ -9,13 +9,46 @@ import path from "path";
 dotenv.config();
 
 const app = express();
+app.use(express.json());
 const server = http.createServer(app);
 const io = new Server(server);
 
+app.post("/api/admin-auth", (req, res) => {
+  try {
+    const { password } = req.body || {};
+    if (!password) return res.status(400).json({ ok: false });
+    if (password === ADMIN_PASSWORD) return res.json({ ok: true });
+    return res.status(401).json({ ok: false });
+  } catch (err) {
+    return res.status(500).json({ ok: false });
+  }
+});
+
 // external persistence file path
-const LOG_FILE = process.env.LOG_FILE || './logs/messages.log';
-const EMAIL_LOG_FILE = process.env.EMAIL_LOG_FILE || './logs/email_messages.log';
-const STATE_FILE = process.env.STATE_FILE || './data/state.json';
+let LOG_FILE = process.env.LOG_FILE || './logs/messages.log';
+let EMAIL_LOG_FILE = process.env.EMAIL_LOG_FILE || './logs/email_messages.log';
+let STATE_FILE = process.env.STATE_FILE || './data/state.json';
+
+function prepareFile(filePath) {
+  const dir = path.dirname(filePath);
+  try {
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    return filePath;
+  } catch (err) {
+    if (err && err.code === 'EACCES') {
+      console.error('Permission denied creating', dir, '- falling back to ./data');
+      const fallbackDir = path.join(process.cwd(), 'data');
+      try { fs.mkdirSync(fallbackDir, { recursive: true }); } catch (e) { /* ignore */ }
+      return path.join(fallbackDir, path.basename(filePath));
+    }
+    throw err;
+  }
+}
+
+LOG_FILE = prepareFile(LOG_FILE);
+EMAIL_LOG_FILE = prepareFile(EMAIL_LOG_FILE);
+STATE_FILE = prepareFile(STATE_FILE);
+
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'kylltulebarmastus';
 const PORT = process.env.PORT || 3000;
 

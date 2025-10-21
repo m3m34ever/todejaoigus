@@ -1,5 +1,4 @@
 let adminMode = false;
-let ADMIN_PASSWORD = "kylltulebarmastus"; // 🔒 change this!
 
 let messages = [];
 try {
@@ -200,15 +199,25 @@ socket.on("newText", (msg) => {
 
 // Toggle admin mode with Shift + A
 document.removeEventListener("keydown", /* noop to ensure no duplicates */);
-document.addEventListener("keydown", (e) => {
+document.addEventListener("keydown", async (e) => {
   if (e.shiftKey && e.key.toLowerCase() === "a") {
     const input = prompt("Enter admin password:");
-    if (input === ADMIN_PASSWORD) {
-      adminMode = true;
-      document.body.classList.add("admin-mode");
-      alert("Admin mode activated. You can now right-click ships to delete them.");
-    } else {
-      alert("Incorrect password.");
+    if (!input) return;
+    try {
+      const res = await fetch("/api/admin-auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: input }),
+      });
+      if (res.ok) {
+        adminMode = true;
+        document.body.classList.add("admin-mode");
+        alert("Admin mode activated. You can now right-click ships to delete them.");
+      } else {
+        alert("Incorrect password.");
+      }
+    } catch (err) {
+      alert("Auth error, try again.");
     }
   }
 });
