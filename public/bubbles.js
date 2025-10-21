@@ -270,8 +270,14 @@ function createAdminControls() {
     const panel = document.getElementById("admin-email-panel-body");
     if (!panel) return;
     const visible = panel.style.display !== "none";
-    panel.style.display = visible ? "none" : "block";
-    if (!visible && !panel.dataset.loaded) fetchEmailLogs(panel);
+    if (visible) {
+      // already open — refresh contents immediately
+      fetchEmailLogs(panel, true);
+      return;
+    }
+    // opening -> show and always fetch current state immediately
+    panel.style.display = "block";
+    fetchEmailLogs(panel, true);
   };
   container.appendChild(btn);
 
