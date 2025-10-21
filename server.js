@@ -12,12 +12,20 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 // external persistence file path
-const LOG_FILE = process.env.LOG_FILE || "/app/logs/messages.log";
-const EMAIL_LOG_FILE = process.env.EMAIL_LOG_FILE || "/app/logs/email_messages.log";
-const STATE_FILE = process.env.STATE_FILE || "/app/data/state.json";
+const LOG_FILE = process.env.LOG_FILE || './logs/messages.log';
+const EMAIL_LOG_FILE = process.env.EMAIL_LOG_FILE || './logs/email_messages.log';
+const STATE_FILE = process.env.STATE_FILE || './data/state.json';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'kylltulebarmastus';
+const PORT = process.env.PORT || 3000;
 
 // admin pwd - make sure to set via env variable in production!
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "kylltulebarmastus";
+function ensureParentDir(filePath) {
+  const dir = path.dirname(filePath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
+ensureParentDir(LOG_FILE);
+ensureParentDir(EMAIL_LOG_FILE);
+ensureParentDir(STATE_FILE);
 
 try {
   fs.mkdirSync('/app/logs', { recursive: true });
@@ -94,7 +102,6 @@ io.on("connection", (socket) => {
 });
 
 // Start server
-const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
