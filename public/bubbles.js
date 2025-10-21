@@ -13,11 +13,6 @@ function saveMessagesToLog() {
     localStorage.setItem('messages', JSON.stringify(messages));
   } catch (e) { /* ignore */ }
 }
-
-
-const socket = io();
-let ships = [];
-
 // Create a new ship
 function createShip(msg) {
   const div = document.createElement("div");
@@ -155,7 +150,7 @@ document.addEventListener("DOMContentLoaded", () => {
     return;
   }
 
-  // Auto-expand textarea
+  // Auto-expand text area
   textInput.addEventListener("input", () => {
     textInput.style.height = "auto";
     textInput.style.height = textInput.scrollHeight + "px";
@@ -216,7 +211,9 @@ document.addEventListener("DOMContentLoaded", () => {
         });
         if (res.ok) {
           adminMode = true;
+          window._adminPassword = input;
           document.body.classList.add("admin-mode");
+          createAdminControls();
           alert("Admin mode activated. You can now right-click ships to delete them.");
         } else {
           alert("Incorrect password.");
@@ -227,3 +224,121 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 });
+
+function createAdminControls() {
+  // avoid duplicates
+  if (document.getElementById("admin-email-panel")) return;
+
+  // wrapper for button + panel
+  const container = document.createElement("div");
+  container.id = "admin-email-panel";
+  container.style.position = "fixed";
+  container.style.top = "12px";
+  container.style.right = "12px";
+  container.style.zIndex = 9999;
+  container.style.display = "flex";
+  container.style.flexDirection = "column";
+  container.style.alignItems = "flex-end";
+  document.body.appendChild(container);
+
+  // toggle button
+  const btn = document.createElement("button");
+  btn.id = "admin-email-logs-button";
+  btn.innerText = "Emails";
+  btn.style.background = "#222";
+  btn.style.color = "#fff";
+  btn.style.border = "1px solid #444";
+  btn.style.padding = "6px 10px";
+  btn.style.borderRadius = "4px";
+  btn.style.cursor = "pointer";
+  btn.onclick = () => {
+    const panel = document.getElementById("admin-email-panel-body");
+    if (!panel) return;
+    const visible = panel.style.display !== "none";
+    panel.style.display = visible ? "none" : "block";
+    if (!visible && !panel.dataset.loaded) fetchEmailLogs(panel);
+  };
+  container.appendChild(btn);
+
+  // collapsible panel
+  const panel = document.createElement("div");
+  panel.id = "admin-email-panel-body";
+  panel.style.display = "none";
+  panel.style.marginTop = "8px";
+  panel.style.width = "480px";
+  panel.style.maxHeight = "60vh";
+  panel.style.overflow = "auto";
+  panel.style.background = "rgba(0,0,0,0.9)";
+  panel.style.color = "#fff";
+  panel.style.border = "1px solid #444";
+  panel.style.borderRadius = "6px";
+  panel.style.padding = "8px";
+  panel.style.boxShadow = "0 4px 16px rgba(0,0,0,0.6)";
+  panel.style.fontFamily = "monospace";
+  panel.style.fontSize = "12px";
+  container.appendChild(panel);
+
+  // panel header (refresh + close)
+  const header = document.createElement("div");
+  header.style.display = "flex";
+  header.style.justifyContent = "space-between";
+  header.style.alignItems = "center";
+  header.style.marginBottom = "6px";
+  panel.appendChild(header);
+
+  const title = document.createElement("div");
+  title.innerText = "email_messages.log";
+  title.style.fontWeight = "600";
+  title.style.marginRight = "8px";
+  header.appendChild(title);
+
+  const controls = document.createElement("div");
+  header.appendChild(controls);
+
+  const refreshBtn = document.createElement("button");
+  refreshBtn.innerText = "Refresh";
+  refreshBtn.style.marginRight = "6px";
+  refreshBtn.onclick = () => fetchEmailLogs(panel, true);
+  controls.appendChild(refreshBtn);
+
+  const closeBtn = document.createElement("button");
+  closeBtn.innerText = "Close";
+  closeBtn.onclick = () => { panel.style.display = "none"; };
+  controls.appendChild(closeBtn);
+
+  // content area
+  const pre = document.createElement("pre");
+  pre.style.whiteSpace = "pre-wrap";
+  pre.style.wordBreak = "break-word";
+  pre.style.margin = "0";
+  pre.style.padding = "4px 0";
+  panel.appendChild(pre);
+
+  // helper to show status while loading
+  panel.dataset.loaded = "false";
+}
+
+async function fetchEmailLogs(panel, forceReload = false) {
+  if (!window._adminPassword) { alert("Admin password missing — re-authenticate."); return; }
+  const pre = panel.querySelector("pre");
+  if (!pre) return;
+  try {
+    pre.innerText = "Loading...";
+    const resp = await fetch("/api/admin/emails", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: window._adminPassword }),
+    });
+    if (resp.status === 200) {
+      const txt = await resp.text();
+      pre.innerText = txt || "(empty)";
+      panel.dataset.loaded = "true";
+    } else if (resp.status === 401) {
+      pre.innerText = "Unauthorized. The password may be incorrect.";
+    } else {
+      pre.innerText = `Failed to load logs: ${resp.status}`;
+    }
+  } catch (err) {
+    pre.innerText = "Fetch error: " + String(err);
+  }
+}

@@ -139,3 +139,16 @@ io.on("connection", (socket) => {
 server.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
+
+app.post("/api/admin/emails", (req, res) => {
+  const supplied = (req.body && req.body.password) ||
+    (req.headers.authorization && req.headers.authorization.split(" ")[1]);
+  if (!supplied || supplied !== ADMIN_PASSWORD) return res.status(401).json({ ok: false });
+  if (!fs.existsSync(EMAIL_LOG_FILE)) return res.type("text/plain").send("");
+  let content = fs.readFileSync(EMAIL_LOG_FILE, "utf8");
+  const MAX_BYTES = 1_000_000;
+  if (Buffer.byteLength(content, "utf8") > MAX_BYTES) {
+    content = `[TRUNCATED - showing last ${MAX_BYTES} bytes]\n\n` + content.slice(-MAX_BYTES);
+  }
+  res.type("text/plain").send(content);
+});
