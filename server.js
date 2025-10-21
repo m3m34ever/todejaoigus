@@ -3,16 +3,50 @@ import express from "express";
 import http from "http";
 import { Server } from "socket.io";
 import fs from "fs";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// Log file path
-const logFile = "messages.log";
+// external persistence file path
+const LOG_FILE = process.env.LOG_FILE || "/app/logs/messages.log";
+const EMAIL_LOG_FILE = process.env.EMAIL_LOG_FILE || "/app/logs/email_messages.log";
+const STATE_FILE = process.env.STATE_FILE || "/app/data/state.json";
+
+// admin pwd - make sure to set via env variable in production!
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "kylltulebarmastus";
+
+try {
+  fs.mkdirSync('/app/logs', { recursive: true });
+  fs.mkdirSync('/app/data', { recursive: true });
+} catch (e) {
+  console.error("Error creating directories:", e);
+}
 
 // Store messages in memory
 let messages = [];
+
+try {
+  if (fs.existsSync(STATE_FILE)) {
+    const raw = fs.readFileSync(STATE_FILE, "utf-8");
+    messages = raw ? JSON.parse(raw) : [];
+  } 
+} catch (err) {
+  console.error("Error loading state file:", err);
+}
+// Save state to file - synchronous to avoid race conditions
+function saveState() {
+  try {
+    const tmp = STATE_FILE + ".tmp"
+    fs.writeFileSync(tmp, JSON.stringify(messages), "utf8");
+    fs.renameSync(tmp, STATE_FILE);
+  } catch (err) {
+    console.error("Failed to save state file:", err);
+  }
+}
 
 // Serve static files (HTML, JS, CSS, video)
 app.use(express.static("public")); // put index.html, bubbles.js, video in 'public' folder
@@ -34,26 +68,26 @@ io.on("connection", (socket) => {
 
     // Save in memory
     messages.push(msg);
+    saveState();
 
     // Broadcast message text to all clients (email stays private)
     io.emit("newText", { text: msg.text });
 
     // Log to server console
-    console.log(`[NEW MESSAGE] ${msg.text}`);
-    if(msg.email){
-      console.log(`  Feedback email: ${msg.email}`);
-    }
+    const logEntry = `[${msg.time.toISOString()}] ${msg.text}` + (msg.email ? ` | Email: ${msg.email}` : "") + "\n";
 
-    // Append message to log file
-    const logEntry = `[${msg.time.toISOString()}] ${msg.text}`
-                   + (msg.email ? ` | Email: ${msg.email}` : "")
-                   + "\n";
-
-    fs.appendFile(logFile, logEntry, (err) => {
-      if(err) console.error("Error writing to log file:", err);
+    fs.appendFile(LOG_FILE, logEntry, (err) => {
+      if (err) console.error("Error writing to log file:", err);
     });
-  });
 
+    if (msg.email) {
+      fs.appendFile(EMAIL_LOG_FILE, logEntry, (err) => {
+        if (err) console.error("Error writing to email log file:", err);
+      });
+    }
+    console.log(`[NEW MESSAGE] ${msg.text}`);
+    if (msg.email) console.log(`  Feedback email: ${msg.email}`);
+  });
   socket.on("disconnect", () => {
     console.log("A user disconnected");
   });

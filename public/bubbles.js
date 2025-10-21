@@ -1,5 +1,20 @@
 let adminMode = false;
-const ADMIN_PASSWORD = "kylltulebarmastus"; // 🔒 change this!
+let ADMIN_PASSWORD = "kylltulebarmastus"; // 🔒 change this!
+
+let messages = [];
+try {
+  const saved = localStorage.getItem("messages");
+  messages = saved ? JSON.parse(saved) : [];
+} catch (e) {
+  console.error("Error loading messages from localStorage:", e);
+}
+
+function saveMessagesToLog() {
+  try {
+    localStorage.setItem('messages', JSON.stringify(messages));
+  } catch (e) { /* ignore */ }
+}
+
 
 const socket = io();
 let ships = [];
@@ -169,27 +184,31 @@ window.sendText = sendText;
 
 // Socket.io events
 socket.on("init", msgs => {
-  msgs.forEach(m => createShip(m));
+  msgs.forEach(m => {
+    messages.push(m);
+    createShip(m);
+  });
   animateShips(); // start animation
+  saveMessagesToLog();
 });
 
-socket.on("newText", msg => createShip(msg));
+socket.on("newText", (msg) => {
+  messages.push(msg)
+  saveMessagesToLog();
+  createShip(msg);
+});
 
 // Toggle admin mode with Shift + A
+document.removeEventListener("keydown", /* noop to ensure no duplicates */);
 document.addEventListener("keydown", (e) => {
   if (e.shiftKey && e.key.toLowerCase() === "a") {
     const input = prompt("Enter admin password:");
     if (input === ADMIN_PASSWORD) {
       adminMode = true;
+      document.body.classList.add("admin-mode");
       alert("Admin mode activated. You can now right-click ships to delete them.");
     } else {
       alert("Incorrect password.");
     }
   }
-
-  if (input === ADMIN_PASSWORD) {
-  adminMode = true;
-  document.body.classList.add("admin-mode");
-  alert("Admin mode activated.");
-}
 });

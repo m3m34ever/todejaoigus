@@ -1,0 +1,15 @@
+services:
+  app:
+    build: .
+    ports:
+      - "${PORT}:${PORT}"
+    environment:
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - LOG_FILE=${LOG_FILE}
+      - EMAIL_LOG_FILE=${EMAIL_LOG_FILE}
+      - PORT=${PORT}
+      - STATE_FILE=${STATE_FILE}
+    volumes:
+      - ../logs:/app/logs
+      - ../data:/app/data
+    restart: unless-stopped
