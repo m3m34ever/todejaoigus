@@ -1,5 +1,5 @@
 let adminMode = false;
-
+let ships = [];
 let messages = [];
 try {
   const saved = localStorage.getItem("messages");
@@ -111,6 +111,22 @@ div.addEventListener("contextmenu", (e) => {
 // Overlay for full text
 function showOverlay(text){
   let overlay = document.getElementById("overlay");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "overlay";
+    overlay.style.position = "fixed";
+    overlay.style.inset = "0";
+    overlay.style.display = "none";
+    overlay.style.alignItems = "center";
+    overlay.style.justifyContent = "center";
+    overlay.style.background = "rgba(0,0,0,0.8)";
+    overlay.style.color = "white";
+    overlay.style.zIndex = 10000;
+    overlay.style.padding = "20px";
+    overlay.style.fontFamily = "monospace";
+    overlay.style.whiteSpace = "pre-wrap";
+    document.body.appendChild(overlay);
+  }
   overlay.innerText = text;
   overlay.style.display = "flex";
   overlay.onclick = ()=> overlay.style.display="none";
@@ -139,7 +155,6 @@ function animateShips(){
 
 document.addEventListener("DOMContentLoaded", () => {
   const socket = io();
-  let ships = [];
 
   const textInput = document.getElementById("textInput");
   const checkbox = document.getElementById("feedbackCheckbox");

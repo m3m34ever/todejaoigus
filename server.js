@@ -135,20 +135,38 @@ io.on("connection", (socket) => {
   });
 });
 
+app.post("/api/admin/emails", (req, res) => {
+  try {
+    const supplied =
+      (req.body && req.body.password) ||
+      (req.headers && req.headers.authorization && req.headers.authorization.split(" ")[1]);
+
+    if (!supplied || supplied !== ADMIN_PASSWORD) {
+      return res.status(401).json({ ok: false, error: "unauthorized" });
+    }
+
+    if (!fs.existsSync(EMAIL_LOG_FILE)) {
+      return res.type("text/plain").send("");
+    }
+
+    let content = fs.readFileSync(EMAIL_LOG_FILE, "utf8");
+
+    const MAX_BYTES = 5_000_000; // 5MB
+    if (Buffer.byteLength(content, "utf8") > MAX_BYTES) {
+      content = content.slice(-MAX_BYTES);
+      const nl = content.indexOf("\n");
+      if (nl >= 0) content = content.slice(nl + 1);
+    }
+
+    res.type("text/plain").send(content);
+  } catch (err) {
+    console.error("Error reading email log:", err);
+    res.status(500).json({ ok: false, error: "internal_error" });
+  }
+});
+
 // Start server
 server.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
 
-app.post("/api/admin/emails", (req, res) => {
-  const supplied = (req.body && req.body.password) ||
-    (req.headers.authorization && req.headers.authorization.split(" ")[1]);
-  if (!supplied || supplied !== ADMIN_PASSWORD) return res.status(401).json({ ok: false });
-  if (!fs.existsSync(EMAIL_LOG_FILE)) return res.type("text/plain").send("");
-  let content = fs.readFileSync(EMAIL_LOG_FILE, "utf8");
-  const MAX_BYTES = 1_000_000;
-  if (Buffer.byteLength(content, "utf8") > MAX_BYTES) {
-    content = `[TRUNCATED - showing last ${MAX_BYTES} bytes]\n\n` + content.slice(-MAX_BYTES);
-  }
-  res.type("text/plain").send(content);
-});
