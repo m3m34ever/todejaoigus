@@ -142,82 +142,88 @@ function animateShips(){
   requestAnimationFrame(animateShips);
 }
 
-// Input box logic
-const textInput = document.getElementById("textInput");
-const checkbox = document.getElementById("feedbackCheckbox");
-const emailInput = document.getElementById("emailInput");
+document.addEventListener("DOMContentLoaded", () => {
+  const socket = io();
+  let ships = [];
 
-// Auto-expand textarea
-textInput.addEventListener("input", () => {
-  textInput.style.height = "auto";
-  textInput.style.height = textInput.scrollHeight + "px";
-});
+  const textInput = document.getElementById("textInput");
+  const checkbox = document.getElementById("feedbackCheckbox");
+  const emailInput = document.getElementById("emailInput");
 
-// Show/hide email input
-checkbox.addEventListener("change", () => {
-  if(checkbox.checked){
-    emailInput.style.display = "block";
-  } else {
-    emailInput.style.display = "none";
-    emailInput.value = "";
+  if (!textInput || !checkbox || !emailInput) {
+    console.warn("bubbles.js: required DOM elements missing; aborting UI init");
+    return;
   }
-});
 
-// Send text
-function sendText(){
-  const text = textInput.value.trim();
-  const wantsFeedback = checkbox.checked;
-  const email = wantsFeedback ? emailInput.value.trim() : null;
-
-  if(text){
-    socket.emit("newText", { text, email });
-    textInput.value = "";
+  // Auto-expand textarea
+  textInput.addEventListener("input", () => {
     textInput.style.height = "auto";
-    checkbox.checked = false;
-    emailInput.value = "";
-    emailInput.style.display = "none";
-  }
-}
-
-window.sendText = sendText;
-
-// Socket.io events
-socket.on("init", msgs => {
-  msgs.forEach(m => {
-    messages.push(m);
-    createShip(m);
+    textInput.style.height = textInput.scrollHeight + "px";
   });
-  animateShips(); // start animation
-  saveMessagesToLog();
-});
 
-socket.on("newText", (msg) => {
-  messages.push(msg)
-  saveMessagesToLog();
-  createShip(msg);
-});
+  // Show/hide email input
+  checkbox.addEventListener("change", () => {
+    if (checkbox.checked) {
+      emailInput.style.display = "block";
+    } else {
+      emailInput.style.display = "none";
+      emailInput.value = "";
+    }
+  });
 
-// Toggle admin mode with Shift + A
-document.removeEventListener("keydown", /* noop to ensure no duplicates */);
-document.addEventListener("keydown", async (e) => {
-  if (e.shiftKey && e.key.toLowerCase() === "a") {
-    const input = prompt("Enter admin password:");
-    if (!input) return;
-    try {
-      const res = await fetch("/api/admin-auth", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: input }),
-      });
-      if (res.ok) {
-        adminMode = true;
-        document.body.classList.add("admin-mode");
-        alert("Admin mode activated. You can now right-click ships to delete them.");
-      } else {
-        alert("Incorrect password.");
-      }
-    } catch (err) {
-      alert("Auth error, try again.");
+  // Send text
+  function sendText(){
+    const text = textInput.value.trim();
+    const wantsFeedback = checkbox.checked;
+    const email = wantsFeedback ? emailInput.value.trim() : null;
+    if(text){
+      socket.emit("newText", { text, email });
+      textInput.value = "";
+      textInput.style.height = "auto";
+      checkbox.checked = false;
+      emailInput.value = "";
+      emailInput.style.display = "none";
     }
   }
+  window.sendText = sendText;
+
+  // Socket.io events
+  socket.on("init", msgs => {
+    msgs.forEach(m => {
+      messages.push(m);
+      createShip(m);
+    });
+    animateShips();
+    saveMessagesToLog();
+  });
+
+  socket.on("newText", (msg) => {
+    messages.push(msg);
+    saveMessagesToLog();
+    createShip(msg);
+  });
+
+  // Toggle admin mode with Shift + A
+  document.addEventListener("keydown", async (e) => {
+    if (e.shiftKey && e.key.toLowerCase() === "a") {
+      const input = prompt("Enter admin password:");
+      if (!input) return;
+      try {
+        const res = await fetch("/api/admin-auth", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: input }),
+        });
+        if (res.ok) {
+          adminMode = true;
+          document.body.classList.add("admin-mode");
+          alert("Admin mode activated. You can now right-click ships to delete them.");
+        } else {
+          alert("Incorrect password.");
+        }
+      } catch (err) {
+        alert("Auth error, try again.");
+      }
+    }
+  });
 });
