@@ -4,6 +4,7 @@ import http from "http";
 import { Server } from "socket.io";
 import fs from "fs";
 import dotenv from "dotenv";
+import path from "path";
 
 dotenv.config();
 
