@@ -308,7 +308,7 @@ function createAdminControls() {
   panel.appendChild(header);
 
   const title = document.createElement("div");
-  title.innerText = "email_messages.log";
+  title.innerText = "Messages with emails attached";
   title.style.fontWeight = "600";
   title.style.marginRight = "8px";
   header.appendChild(title);
