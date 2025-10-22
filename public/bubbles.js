@@ -61,11 +61,29 @@ function createShip(msg) {
   div.angle = Math.random() * 360;
   div.rotationSpeed = (Math.random() - 0.5) * 0.5;
 
-  const s = Math.max(40, Math.min(80, Math.round(window.innerWidth * 0.06))); // ship size
+  let s = 60;
+  try {
+    // element is not yet in layout if created off-DOM; use getBoundingClientRect when possible
+    const rect = div.getBoundingClientRect();
+    if (rect && rect.width && rect.height) {
+      s = Math.round(Math.min(60, Math.max(28, Math.min(rect.width, rect.height))));
+    } else {
+      // fallback based on viewport for initial render (desktop default 60)
+      if (window.innerWidth <= 720 || window.innerHeight > window.innerWidth) {
+        // small / portrait devices -> smaller base size
+        s = Math.round(Math.min(48, Math.max(28, Math.round(window.innerWidth * 0.06))));
+      } else {
+        s = 60;
+      }
+    }
+  } catch (e) {
+    s = 60;
+  }
 
   const svgNS = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(svgNS, "svg");
   svg.setAttribute("viewBox", `-${s*0.6} -${s*0.6} ${s*1.2} ${s*1.2}`);
+  // make svg scale to its parent .ship size
   svg.style.width = "100%";
   svg.style.height = "100%";
   svg.style.display = "block";

@@ -18,10 +18,19 @@ body {
 /* Ships */
 .ship {
   position: absolute;
-  width: clamp(36px, 9vw, 60px);
-  height: clamp(36px, 9vw, 60px);
+  /* default desktop size */
+  width: 60px;
+  height: 60px;
   cursor: pointer;
   pointer-events: auto;
+}
+
+/* smaller ships on narrow / portrait / mobile views */
+@media (max-width: 720px), (orientation: portrait) {
+  .ship {
+    width: clamp(28px, 9vw, 48px);
+    height: clamp(28px, 9vw, 48px);
+  }
 }
 
 @media (max-width: 520px) {
