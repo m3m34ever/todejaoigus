@@ -149,6 +149,24 @@ label {
 }
 
 /* Checkbox style */
+input[type="checkbox"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  border-radius: 8px;
+  border: 1.6px solid rgba(255,255,255,0.14);   /* same visual weight as inputs */
+  background: rgba(255,255,255,0.02);           /* same subtle bg as inputs */
+  display: inline-block;
+  position: relative;
+  cursor: pointer;
+  vertical-align: middle;
+  transition: background .12s, border-color .12s, transform .12s;
+  box-sizing: border-box;
+}
+
 input[type="checkbox"]::after {
   content: "";
   position: absolute;
@@ -163,7 +181,7 @@ input[type="checkbox"]::after {
   transition: opacity .12s, transform .12s;
 }
 
-/* visible when checked */
+/* checked state: slightly stronger bg and border like inputs focus */
 input[type="checkbox"]:checked {
   background: rgba(255,255,255,0.06);
   border-color: rgba(255,255,255,0.28);
@@ -173,6 +191,9 @@ input[type="checkbox"]:checked::after {
   transform: rotate(45deg) scale(1);
 }
 
+label {
+  background: transparent;
+}
 /* hover / active affordances */
 label:hover { background: rgba(255,255,255,0.03); }
 label:active { transform: translateY(1px); }
