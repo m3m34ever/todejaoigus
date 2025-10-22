@@ -2,16 +2,17 @@
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Text Ships</title>
 <style>
-html, body { -webkit-text-size-adjust: 100%; -moz-text-size-adjust: 100%; -ms-text-size-adjust: 100%; text-size-adjust: 100%; }
+html, body { -webkit-text-size-adjust: 100%; -moz-text-size-adjust: 100%; -ms-text-size-adjust: 100%; text-size-adjust: 100%; height: 100dvh;}
 body {
   margin:0;
   background:#222;
   font-family: Arial, sans-serif; /* all text Arial */
   overflow:hidden;
   color: white; /* default text color */
+  min-height: 100dvh;
 }
 
 /* Ships */
@@ -78,11 +79,11 @@ body {
 /* Video background */
 #bgVideo {
   position: fixed;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  width: 100%;
-  height: calc(var(--vh, 1vh) * 100); /* use JS-updated --vh */
+  inset: 0; /* top:0; right:0; bottom:0; left:0 */
+  width: 100vw;
+  /* prefer dynamic viewport unit, fall back to JS-set --vh */
+  height: 100dvh;
+  height: calc(var(--vh, 1vh) * 100);
   object-fit: cover;
   object-position: 50% 50%; /* default center */
   background-color: #000; /* avoid visible gaps */
@@ -95,6 +96,8 @@ body {
     transform: none;
     transform-origin: center top;
     will-change: object-position;
+    /* account for iOS safe area if needed */
+    padding-bottom: env(safe-area-inset-bottom);
   }
 }
 
