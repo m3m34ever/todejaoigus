@@ -379,10 +379,9 @@ async function fetchEmailLogs(panel, forceReload = false) {
     });
     if (resp.status === 200) {
       const txt = await resp.text();
-      const useTallinn = true;
-      const tz = useTallinn ? "Europe/Tallinn" : undefined;
+      const tz = "Europe/Tallinn";
       const formatted = txt.split("\n").map(line => {
-        line.match(/^\s*\[([^\]]+)\]\s*(.*)$/);
+        const m = line.match(/^\s*\[([^\]]+)\]\s*(.*)$/);
         if (!m) return line;
         const iso = m[1];
         const rest = m[2] || "";
@@ -399,7 +398,8 @@ async function fetchEmailLogs(panel, forceReload = false) {
         const formattedTs = `${get("hour")}:${get("minute")} ${get("day")}/${get("month")}/${get("year")}`;
         return `${formattedTs} ${rest}`.trim();
       }).join("\n");
-      pre.innerText = txt || "(empty)";
+
+      pre.innerText = formatted || "(empty)";
       panel.dataset.loaded = "true";
     } else if (resp.status === 401) {
       pre.innerText = "Unauthorized. The password may be incorrect.";
