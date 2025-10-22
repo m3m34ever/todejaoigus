@@ -18,14 +18,21 @@ app.post("/api/admin-auth", (req, res) => {
   try {
     const ip = getIpFromReq(req);
     const { password } = req.body || {};
-    if (!password) {
-      fs.appendFile(LOG_FILE, `[ADMIN AUTH] [${time}] IP ${ip || 'unknown'} attempted admin auth with incorrect password\n`, (e)=>{ if(e) console.error(e); });
-    return res.status(400).json({ ok: false })
-    };
-    const success = password === ADMIN_PASSWORD;
-    fs.appendFile(LOG_FILE, `[ADMIN AUTH] [${time}] IP: ${ip || 'unknown'} - ${success ? 'success' : 'failure'}\n`, (e)=>{ if(e) console.error(e); });
-    if (success) return res.json({ ok: true });
-    return res.status(401).json({ ok: false });
+    const time = new Date().toISOString();
+    try {
+      if (!password) {
+        fs.appendFile(LOG_FILE || './logs/messages.log', `[ADMIN AUTH] [${time}] IP: ${ip || 'unknown'} - missing password\n`, () => {});
+        return res.status(400).json({ ok: false });
+      }
+      const success = password === ADMIN_PASSWORD;
+      fs.appendFile(LOG_FILE || './logs/messages.log', `[ADMIN AUTH] [${time}] IP: ${ip || 'unknown'} - ${success ? 'success' : 'failure'}\n`, () => {});
+      if (success) return res.json({ ok: true });
+      return res.status(401).json({ ok: false });
+    } catch (e) {
+      console.error("Failed to write admin auth log:", e);
+      if (password === ADMIN_PASSWORD) return res.json({ ok: true });
+      return res.status(401).json({ ok: false });
+    }
   } catch (err) {
     console.error("Error in admin auth:", err);
     return res.status(500).json({ ok: false });
