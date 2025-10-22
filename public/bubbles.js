@@ -396,7 +396,8 @@ async function fetchEmailLogs(panel, forceReload = false) {
         }).formatToParts(d);
         const get = t => (parts.find(p => p.type === t) || {}).value || "";
         const formattedTs = `${get("hour")}:${get("minute")} ${get("day")}/${get("month")}/${get("year")}`;
-        return `${formattedTs} ${rest}`.trim();
+        if (rest === "") return `| ${formattedTs}`;
+        return `${rest} | ${formattedTs}`;
       }).join("\n");
 
       pre.innerText = formatted || "(empty)";

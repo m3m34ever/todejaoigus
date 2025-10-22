@@ -79,18 +79,15 @@ const PORT = process.env.PORT || 3000;
 // admin pwd - make sure to set via env variable in production!
 function ensureParentDir(filePath) {
   const dir = path.dirname(filePath);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  try {
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  } catch (err) {
+    console.warn('Could not create dir', dir, '-', err && err.code ? err.code : err);
+  }
 }
 ensureParentDir(LOG_FILE);
 ensureParentDir(EMAIL_LOG_FILE);
 ensureParentDir(STATE_FILE);
-
-try {
-  fs.mkdirSync('/app/logs', { recursive: true });
-  fs.mkdirSync('/app/data', { recursive: true });
-} catch (e) {
-  console.error("Error creating directories:", e);
-}
 
 // Store messages in memory
 let messages = [];
