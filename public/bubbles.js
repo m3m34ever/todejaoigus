@@ -61,13 +61,14 @@ function createShip(msg) {
   div.angle = Math.random() * 360;
   div.rotationSpeed = (Math.random() - 0.5) * 0.5;
 
-  const s = 80; // ship size
+  const s = Math.max(40, Math.min(80, Math.round(window.innerWidth * 0.06))); // ship size
 
   const svgNS = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(svgNS, "svg");
   svg.setAttribute("viewBox", `-${s*0.6} -${s*0.6} ${s*1.2} ${s*1.2}`);
-  svg.setAttribute("width", s);
-  svg.setAttribute("height", s);
+  svg.style.width = "100%";
+  svg.style.height = "100%";
+  svg.style.display = "block";
 
   // Origami ship shape
   const shipShape = document.createElementNS(svgNS, "polygon");
@@ -177,9 +178,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function updateCheckboxScale() {
     if (!checkbox) return;
-    const scale = window.innerWidth > 1200 ? 1.45 : window.innerWidth > 800 ? 1.35 : 1.15;
     const labelEl = checkbox.closest("label");
-    if (labelEl) labelEl.style.transform = `scale(${scale})`;
+    if (!labelEl) return;
+    const scale = window.innerWidth > 1200 ? 1.08 : window.innerWidth > 800 ? 1.04 : 1.0;
+    labelEl.style.transform = `scale(${scale})`;
   }
   window.addEventListener("resize", updateCheckboxScale);
   updateCheckboxScale();

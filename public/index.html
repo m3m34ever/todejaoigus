@@ -17,10 +17,17 @@ body {
 /* Ships */
 .ship {
   position: absolute;
-  width: 60px;
-  height: 60px;
+  width: clamp(36px, 9vw, 60px);
+  height: clamp(36px, 9vw, 60px);
   cursor: pointer;
   pointer-events: auto;
+}
+
+@media (max-width: 520px) {
+  .ship-preview { font-size: 10px !important; }
+  label h1 { font-size: 0.72em !important; }
+  #textInput { min-height: clamp(36px, 10vh, 120px); }
+  #emailInput { min-height: 28px; }
 }
 
 .ship svg {
@@ -82,8 +89,8 @@ body {
 }
 @media (orientation: portrait), (max-aspect-ratio: 3/4) {
   #bgVideo {
-    object-position: 50% 30%; /* move visible area upward so video shows more vertical content */
-    transform: scale(1.06);   /* small scale to fill possible gaps after shifting */
+    object-position: 50% 28%; /* move visible area upward so video shows more vertical content */
+    transform: scale(1.16);   /* small scale to fill possible gaps after shifting */
   }
 }
 
