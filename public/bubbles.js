@@ -29,6 +29,12 @@ div.addEventListener("contextmenu", (e) => {
     ships = ships.filter(s => s !== div);
   }
 });
+function clearShips() {
+  for (const s of ships) {
+    if (s && s.remove) s.remove();
+  }
+  ships = [];
+}
 
   // Random initial position
   div.x = Math.random() * (window.innerWidth - 100);
@@ -199,6 +205,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Socket.io events
   socket.on("init", msgs => {
+    clearShips();
     msgs.forEach(m => {
       messages.push(m);
       createShip(m);
@@ -208,9 +215,22 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   socket.on("newText", (msg) => {
+    const last = messages[messages.length - 1];
+    if (last && last.text === msg.text && last.email === msg.email) {
+      return; // duplicate, ignore
+    }
+
+    const exists = ships.some(s => s.dataset && s.dataset.text === msg.text);
+    if (exists) {
+      messages.push(msg);
+      saveMessagesToLog();
+      return;
+    }
     messages.push(msg);
     saveMessagesToLog();
-    createShip(msg);
+      // keep text cached on element for duplicate checks
+    const created = createShip(msg);
+    if (created && created.dataset) created.dataset.text = msg.text;
   });
 
   // Toggle admin mode with Shift + A

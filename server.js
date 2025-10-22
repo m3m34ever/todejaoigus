@@ -9,20 +9,37 @@ import path from "path";
 dotenv.config();
 
 const app = express();
+app.set('trust proxy', true);
 app.use(express.json());
 const server = http.createServer(app);
 const io = new Server(server);
 
 app.post("/api/admin-auth", (req, res) => {
   try {
+    const ip = getIpFromReq(req);
     const { password } = req.body || {};
-    if (!password) return res.status(400).json({ ok: false });
-    if (password === ADMIN_PASSWORD) return res.json({ ok: true });
+    if (!password) {
+      fs.appendFile(LOG_FILE, `[ADMIN AUTH] [${time}] IP ${ip || 'unknown'} attempted admin auth with incorrect password\n`, (e)=>{ if(e) console.error(e); });
+    return res.status(400).json({ ok: false })
+    };
+    const success = password === ADMIN_PASSWORD;
+    fs.appendFile(LOG_FILE, `[ADMIN AUTH] [${time}] IP: ${ip || 'unknown'} - ${success ? 'success' : 'failure'}\n`, (e)=>{ if(e) console.error(e); });
+    if (success) return res.json({ ok: true });
     return res.status(401).json({ ok: false });
   } catch (err) {
+    console.error("Error in admin auth:", err);
     return res.status(500).json({ ok: false });
   }
 });
+
+function getIpFromReq(req) {
+  return (
+    (req.headers && req.headers['x-forwarded-for'] && req.headers['x-forwarded-for'].split(',')[0].trim()) ||
+    req.ip ||
+    (req.socket && req.socket.remoteAddress) ||
+    null
+  );
+}
 
 // external persistence file path
 let LOG_FILE = process.env.LOG_FILE || './logs/messages.log';
@@ -95,17 +112,27 @@ app.use(express.static("public")); // put index.html, bubbles.js, video in 'publ
 
 // Socket.io connection
 io.on("connection", (socket) => {
-  console.log("A user connected");
+
+  const ip = 
+  (socket.handshake && socket.handshake.headers && socket.handshake.headers['x-forwarded-for'] && socket.handshake.headers['x-forwarded-for'].split(',')[0].trim()) ||
+  socket.handshake?.address ||
+  socket.request?.socket?.remoteAddress ||
+  socket.conn?.remoteAddress ||
+  null;
+
+  socket.data.ip = ip;
+  console.log("A user connected", ip ? `from IP: ${ip}` : '');
 
   // Send existing messages to the new user (without emails)
-  socket.emit("init", messages.map(m => ({ text: m.text })));
+  socket.emit("init", messages.map(m => ({ text: m.text, time: m.time, hasEmail: !!m.email })));
 
   // Handle new messages
   socket.on("newText", (data) => {
     const msg = {
       text: data.text,
       email: data.email || null,
-      time: new Date()
+      time: new Date().toISOString(),
+      ip: socket.data.ip || null
     };
 
     // Save in memory
@@ -113,37 +140,46 @@ io.on("connection", (socket) => {
     saveState();
 
     // Broadcast message text to all clients (email stays private)
-    io.emit("newText", { text: msg.text });
+    io.emit("newText", { text: msg.text, time: msg.time, hasEmail: !!msg.email });
 
     // Log to server console
-    const logEntry = `[${msg.time.toISOString()}] ${msg.text}` + (msg.email ? ` | Email: ${msg.email}` : "") + "\n";
+    const logEntry = `[${msg.time}] ${msg.text}` +
+    (msg.email ? ` | Email: ${msg.email}` : "") +
+    (msg.ip ? ` | IP: ${msg.ip}` : "") + "\n";
 
     fs.appendFile(LOG_FILE, logEntry, (err) => {
       if (err) console.error("Error writing to log file:", err);
     });
 
     if (msg.email) {
-      fs.appendFile(EMAIL_LOG_FILE, logEntry, (err) => {
+      const emailLogEntry = `[${msg.time}] ${msg.text}` + (msg.email ? ` | Email: ${msg.email}` : "") + "\n";
+      fs.appendFile(EMAIL_LOG_FILE, emailLogEntry, (err) => {
         if (err) console.error("Error writing to email log file:", err);
       });
     }
-    console.log(`[NEW MESSAGE] ${msg.text}`);
+    console.log(`[NEW MESSAGE] ${msg.text}` + (msg.ip ? ` (from ${msg.ip})` : ''));
     if (msg.email) console.log(`  Feedback email: ${msg.email}`);
   });
   socket.on("disconnect", () => {
-    console.log("A user disconnected");
+    console.log("A user disconnected", ip ? `from IP: ${ip}` : '');
   });
 });
 
 app.post("/api/admin/emails", (req, res) => {
   try {
+    const ip = getIpFromReq(req);
     const supplied =
       (req.body && req.body.password) ||
       (req.headers && req.headers.authorization && req.headers.authorization.split(" ")[1]);
 
+    const time = new Date().toISOString();
+
     if (!supplied || supplied !== ADMIN_PASSWORD) {
+      fs.appendFile(LOG_FILE, `[ADMIN EMAILS] [${time}] IP: ${ip || 'unknown'} - unauthorized attempt\n`, (e)=>{ if(e) console.error(e); });
       return res.status(401).json({ ok: false, error: "unauthorized" });
     }
+
+    fs.appendFile(LOG_FILE, `[ADMIN EMAILS] [${time}] IP: ${ip || 'unknown'} - authorized fetch\n`, (e)=>{ if(e) console.error(e); });
 
     if (!fs.existsSync(EMAIL_LOG_FILE)) {
       return res.type("text/plain").send("");

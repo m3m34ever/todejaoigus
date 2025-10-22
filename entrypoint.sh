@@ -1,13 +1,7 @@
 #!/bin/sh
-LOG_DIR="/app/logs"
-DATA_DIR="/app/data"
-
-mkdir -p "$LOG_DIR" "$DATA_DIR"
-touch "$LOG_DIR/messages.log" "$LOG_DIR/email_messages.log" "$DATA_DIR/state.json" 2>/dev/null || true
-chown -R node:node "$LOG_DIR" "$DATA_DIR" 2>/dev/null || true
-
-if [ $# -eq 0 ]; then
-  exec node 
-else
-  exec "$@"
-fi
+set -e
+mkdir -p /data
+mkdir -p "$(dirname "$STATE_FILE")" "$(dirname "$LOG_FILE")" "$(dirname "$EMAIL_LOG_FILE")"
+touch "$STATE_FILE" "$LOG_FILE" "$EMAIL_LOG_FILE"
+chown -R node:node /data 2>/dev/null || true
+exec "$@"
