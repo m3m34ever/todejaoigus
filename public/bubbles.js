@@ -209,11 +209,15 @@ document.addEventListener("DOMContentLoaded", () => {
   // Socket.io events
   socket.on("init", msgs => {
     clearShips();
+    messages = [];
     msgs.forEach(m => {
       messages.push(m);
       createShip(m);
     });
-    animateShips();
+    if (!window._shipsAnimating) {
+      window._shipsAnimating = true;
+      animateShips();
+    }
     saveMessagesToLog();
   });
 
