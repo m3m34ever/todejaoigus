@@ -379,6 +379,26 @@ async function fetchEmailLogs(panel, forceReload = false) {
     });
     if (resp.status === 200) {
       const txt = await resp.text();
+      const useTallinn = true;
+      const tz = useTallinn ? "Europe/Tallinn" : undefined;
+      const formatted = txt.split("\n").map(line => {
+        line.match(/^\s*\[([^\]]+)\]\s*(.*)$/);
+        if (!m) return line;
+        const iso = m[1];
+        const rest = m[2] || "";
+        const d = new Date(iso);
+        if (isNaN(d)) return line;
+
+        const parts = new Intl.DateTimeFormat("en-GB", {
+          hour: "2-digit", minute: "2-digit",
+          day: "2-digit", month: "2-digit", year: "numeric",
+          hour12: false,
+          timeZone: tz
+        }).formatToParts(d);
+        const get = t => (parts.find(p => p.type === t) || {}).value || "";
+        const formattedTs = `${get("hour")}:${get("minute")} ${get("day")}/${get("month")}/${get("year")}`;
+        return `${formattedTs} ${rest}`.trim();
+      }).join("\n");
       pre.innerText = txt || "(empty)";
       panel.dataset.loaded = "true";
     } else if (resp.status === 401) {
