@@ -80,10 +80,10 @@ body {
 /* Input fields */
 #textInput, #emailInput {
   font-family: Arial, sans-serif;
-  width: clamp(240px, 80vw, 900px);
-  font-size: clamp(14px, 2.6vw, 18px);
-  padding: 8px 12px;
-  border: 1px solid rgba(255,255,255,0.16);
+  width: clamp(200px, 70vw, 700px);
+  font-size: clamp(13px, 2.2vw, 16px);
+  padding: 8px 10px;
+  border: 1px solid rgba(255,255,255,0.14);
   background: rgba(255,255,255,0.02);
   color: white;
   outline: none;
@@ -92,18 +92,19 @@ body {
   overflow: auto;
   box-sizing: border-box;
   max-width: 95%;
-  /* vertical scaling */
-  min-height: clamp(80px, 16vh, 300px); /* text area grows on tall screens */
-  max-height: 60vh;
+}
+
+#textInput {
+  min-height: clamp(40px, 9vh, 150px);
+  max-height: 30vh;
 }
 
 #emailInput {
-  /* email field should be shorter vertically */
-  min-height: clamp(38px, 6.5vh, 90px);
-  max-height: 18vh;
-  width: clamp(200px, 40vw, 500px);
-  font-size: clamp(13px, 2.2vw, 16px);
-  padding: 8px 10px;
+  min-height: clamp(28px, 5vh, 60px);
+  max-height: 12vh;
+  width: clamp(160px, 35vw, 420px);
+  font-size: clamp(13px, 2.0vw, 15px);
+  padding: 6px 10px;
   border-radius: 8px;
 }
 
@@ -127,32 +128,45 @@ body {
 label {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: 10px;
-  background: rgba(255,255,255,0.04);
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: transparent;
   color: rgba(255,255,255,0.95);
   font-size: 14px;
   cursor: pointer;
   user-select: none;
   transition: background .18s, transform .18s;
-  backdrop-filter: blur(4px);
+  backdrop-filter: blur(2px);
 }
 
 /* Checkbox style */
-input[type="checkbox"] {
-  accent-color: white; /* makes the tick white */
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-  vertical-align: middle;
-  margin: 0;
-  background: transparent;
-  transform-origin: center;
-  transition: transform .12s;
+input[type="checkbox"]::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 6px;
+  height: 10px;
+  border: solid rgba(255,255,255,0.95);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) scale(0.9);
+  opacity: 0;
+  transition: opacity .12s, transform .12s;
 }
 
-label:hover { background: rgba(255,255,255,0.06); }
+/* visible when checked */
+input[type="checkbox"]:checked {
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.28);
+}
+input[type="checkbox"]:checked::after {
+  opacity: 1;
+  transform: rotate(45deg) scale(1);
+}
+
+/* hover / active affordances */
+label:hover { background: rgba(255,255,255,0.03); }
 label:active { transform: translateY(1px); }
 
 /* Checkbox label text */
