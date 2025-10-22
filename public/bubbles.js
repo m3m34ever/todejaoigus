@@ -1,6 +1,7 @@
 let adminMode = false;
 let ships = [];
 let messages = [];
+
 try {
   const saved = localStorage.getItem("messages");
   messages = saved ? JSON.parse(saved) : [];
@@ -13,6 +14,14 @@ function saveMessagesToLog() {
     localStorage.setItem('messages', JSON.stringify(messages));
   } catch (e) { /* ignore */ }
 }
+
+function clearShips() {
+  for (const s of ships) {
+    if (s && s.remove) s.remove();
+  }
+  ships = [];
+}
+
 // Create a new ship
 function createShip(msg) {
   const div = document.createElement("div");
@@ -29,12 +38,6 @@ div.addEventListener("contextmenu", (e) => {
     ships = ships.filter(s => s !== div);
   }
 });
-function clearShips() {
-  for (const s of ships) {
-    if (s && s.remove) s.remove();
-  }
-  ships = [];
-}
 
   // Random initial position
   div.x = Math.random() * (window.innerWidth - 100);
