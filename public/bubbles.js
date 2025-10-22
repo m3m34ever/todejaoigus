@@ -262,7 +262,15 @@ document.addEventListener("DOMContentLoaded", () => {
     window.addEventListener("resize", resizeInput);
     resizeInput();
   }
-
+  function updateVh() {
+    try {
+      const vh = window.innerHeight * 0.01;
+      document.documentElement.style.setProperty("--vh", `${vh}px`);
+    } catch (e) { /* ignore */ }
+  }
+  updateVh();
+  window.addEventListener("resize", updateVh);
+  window.addEventListener("orientationchange", updateVh);
 
   // Auto-expand text area
   if (textInput) {
