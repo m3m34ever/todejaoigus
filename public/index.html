@@ -89,8 +89,10 @@ body {
 }
 @media (orientation: portrait), (max-aspect-ratio: 3/4) {
   #bgVideo {
-    object-position: 50% 28%; /* move visible area upward so video shows more vertical content */
-    transform: scale(1.16);   /* small scale to fill possible gaps after shifting */
+    object-position: 50% 28%;
+    transform: none;
+    transform-origin: center top;
+    will-change: object-position;
   }
 }
 
