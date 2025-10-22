@@ -8,7 +8,7 @@
 html, body { -webkit-text-size-adjust: 100%; -moz-text-size-adjust: 100%; -ms-text-size-adjust: 100%; text-size-adjust: 100%; height: 100dvh;}
 body {
   margin:0;
-  background:#222;
+  background: transparent;
   font-family: Arial, sans-serif; /* all text Arial */
   overflow:hidden;
   color: white; /* default text color */
@@ -95,8 +95,7 @@ body {
   min-height: -webkit-fill-available; /* iOS fallback */
   height: calc(var(--vh, 1vh) * 100);
   object-fit: cover;
-  object-position: 50% 50%; /* default center */
-  bottom: calc(0px - env(safe-area-inset-bottom));
+  object-position: 50% var(--video-y, 50%);
   background-color: #000; /* avoid visible gaps */
   z-index: 0;
 }

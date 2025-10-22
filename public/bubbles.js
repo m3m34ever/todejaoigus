@@ -193,42 +193,95 @@ document.addEventListener("DOMContentLoaded", () => {
   const textInput = document.getElementById("textInput");
   const checkbox = document.getElementById("feedbackCheckbox");
   const emailInput = document.getElementById("emailInput");
-
   const bg = document.getElementById("bgVideo");
-
-  function nudgeVideoIntoChromeArea() {
-    try {
-      const vv = window.visualViewport;
-      // compute how much UI chrome is taking vertically (positive if chrome reduces visible area)
-      const chromeHeight = vv ? (window.innerHeight - vv.height - (vv.offsetTop || 0)) : 0;
-      // convert to a small percent shift (clamp to avoid over-cropping)
-      const pct = Math.max(-12, Math.min(12, (chromeHeight / window.innerHeight) * 100));
-      // move the video down a bit (increase y) so more of the bottom is visible under chrome
-      const base = 50 + pct;
-      document.documentElement.style.setProperty("--video-y", base + "%");
-      if (bg) {
-        // small repaint hints
-        bg.style.willChange = "object-position";
-        // touch currentTime to force decoder / frame readiness on some iOS builds
-        if (bg.readyState >= 1 && bg.currentTime < 0.05) {
-          try { bg.currentTime = Math.min(0.05, bg.duration || 0.05); } catch(e) {}
-        }
-        // nudge a reflow
-        void bg.offsetWidth;
+function nudgeVideoIntoChromeArea() {
+  try {
+    const vv = window.visualViewport;
+    const chromeHeight = vv ? (window.innerHeight - vv.height - (vv.offsetTop || 0)) : 0;
+    const pct = Math.max(-12, Math.min(12, (chromeHeight / window.innerHeight) * 100));
+    const base = 50 + pct;
+    console.debug('visualViewport', { innerHeight: window.innerHeight, vvHeight: vv ? vv.height : null, vvOffsetTop: vv ? vv.offsetTop : null, chromeHeight, pct, videoY: base + '%' });
+    document.documentElement.style.setProperty("--video-y", base + "%");
+    document.documentElement.style.setProperty("--video-y", base + "%");
+    if (bg) {
+      bg.style.willChange = "object-position";
+      if (bg.readyState >= 1 && bg.currentTime < 0.05) {
+        try { bg.currentTime = Math.min(0.05, bg.duration || 0.05); } catch(e) {}
       }
-    } catch (e) { /* ignore */ }
+      void bg.offsetWidth;
+    }
+  } catch (e) {}
+}
+nudgeVideoIntoChromeArea();
+window.addEventListener("resize", nudgeVideoIntoChromeArea);
+window.addEventListener("orientationchange", nudgeVideoIntoChromeArea);
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", nudgeVideoIntoChromeArea);
+  window.visualViewport.addEventListener("scroll", nudgeVideoIntoChromeArea);
+}
+if (bg) bg.addEventListener("loadedmetadata", nudgeVideoIntoChromeArea);
+
+  const isIOS = () => {
+    return /iP(ad|hone|od)/.test(navigator.platform)
+      || (navigator.userAgent.includes("Mac") && 'ontouchend' in document);
+  };
+
+  function lockBodyForIOS() {
+    if (!isIOS()) return;
+    const b = document.body;
+    // preserve scroll position and freeze layout so visualViewport changes don't shift content
+    const scrollY = window.scrollY || window.pageYOffset || 0;
+    b.dataset._savedScroll = String(scrollY);
+    b.style.position = 'fixed';
+    b.style.top = `-${scrollY}px`;
+    b.style.left = '0';
+    b.style.right = '0';
+    b.style.width = '100%';
   }
 
-  // run on load and relevant events
-  nudgeVideoIntoChromeArea();
-  window.addEventListener("resize", nudgeVideoIntoChromeArea);
-  window.addEventListener("orientationchange", nudgeVideoIntoChromeArea);
-  if (window.visualViewport) {
-    window.visualViewport.addEventListener("resize", nudgeVideoIntoChromeArea);
-    window.visualViewport.addEventListener("scroll", nudgeVideoIntoChromeArea);
+  function unlockBodyForIOS() {
+    if (!isIOS()) return;
+    const b = document.body;
+    const prev = parseInt(b.dataset._savedScroll || '0', 10);
+    // restore
+    b.style.position = '';
+    b.style.top = '';
+    b.style.left = '';
+    b.style.right = '';
+    b.style.width = '';
+    delete b.dataset._savedScroll;
+    // restore scroll
+    window.scrollTo(0, prev);
   }
-  // also run once when video metadata is ready
-  if (bg) bg.addEventListener("loadedmetadata", nudgeVideoIntoChromeArea);
+
+  // for non-iOS browsers hide overflow to avoid double-scrollbars
+  function applyNonIOSFix() {
+    if (!isIOS()) {
+      document.documentElement.style.overflow = 'hidden';
+      document.body.style.overflow = 'hidden';
+    }
+  }
+
+  // apply on load
+  lockBodyForIOS();
+  applyNonIOSFix();
+
+  // allow keyboard interactions: unlock when user focuses an input, relock on blur
+  const inputs = Array.from(document.querySelectorAll('input, textarea'));
+  inputs.forEach(inp => {
+    inp.addEventListener('focus', () => { unlockBodyForIOS(); });
+    inp.addEventListener('blur',  () => { setTimeout(lockBodyForIOS, 250); });
+  });
+
+  // also relock after orientation/visualViewport events (if needed)
+  window.addEventListener('orientationchange', () => { setTimeout(lockBodyForIOS, 300); });
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', () => { setTimeout(lockBodyForIOS, 120); });
+    window.visualViewport.addEventListener('scroll', () => { setTimeout(lockBodyForIOS, 120); });
+  }
+
+  // restore on unload
+  window.addEventListener('pagehide', unlockBodyForIOS);
 
   function updateCheckboxScale() {
     if (!checkbox) return;
