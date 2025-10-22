@@ -194,6 +194,42 @@ document.addEventListener("DOMContentLoaded", () => {
   const checkbox = document.getElementById("feedbackCheckbox");
   const emailInput = document.getElementById("emailInput");
 
+  const bg = document.getElementById("bgVideo");
+
+  function nudgeVideoIntoChromeArea() {
+    try {
+      const vv = window.visualViewport;
+      // compute how much UI chrome is taking vertically (positive if chrome reduces visible area)
+      const chromeHeight = vv ? (window.innerHeight - vv.height - (vv.offsetTop || 0)) : 0;
+      // convert to a small percent shift (clamp to avoid over-cropping)
+      const pct = Math.max(-12, Math.min(12, (chromeHeight / window.innerHeight) * 100));
+      // move the video down a bit (increase y) so more of the bottom is visible under chrome
+      const base = 50 + pct;
+      document.documentElement.style.setProperty("--video-y", base + "%");
+      if (bg) {
+        // small repaint hints
+        bg.style.willChange = "object-position";
+        // touch currentTime to force decoder / frame readiness on some iOS builds
+        if (bg.readyState >= 1 && bg.currentTime < 0.05) {
+          try { bg.currentTime = Math.min(0.05, bg.duration || 0.05); } catch(e) {}
+        }
+        // nudge a reflow
+        void bg.offsetWidth;
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  // run on load and relevant events
+  nudgeVideoIntoChromeArea();
+  window.addEventListener("resize", nudgeVideoIntoChromeArea);
+  window.addEventListener("orientationchange", nudgeVideoIntoChromeArea);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", nudgeVideoIntoChromeArea);
+    window.visualViewport.addEventListener("scroll", nudgeVideoIntoChromeArea);
+  }
+  // also run once when video metadata is ready
+  if (bg) bg.addEventListener("loadedmetadata", nudgeVideoIntoChromeArea);
+
   function updateCheckboxScale() {
     if (!checkbox) return;
     const labelEl = checkbox.closest("label");

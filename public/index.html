@@ -95,7 +95,7 @@ body {
   min-height: -webkit-fill-available; /* iOS fallback */
   height: calc(var(--vh, 1vh) * 100);
   object-fit: cover;
-  object-position: 50% 50%; /* default center */
+  object-position: 50% var(--video-y, 50%); /* default center */
   bottom: calc(0px - env(safe-area-inset-bottom));
   background-color: #000; /* avoid visible gaps */
   z-index: 0;
