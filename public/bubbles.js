@@ -175,6 +175,14 @@ document.addEventListener("DOMContentLoaded", () => {
   const checkbox = document.getElementById("feedbackCheckbox");
   const emailInput = document.getElementById("emailInput");
 
+  function updateCheckboxScale() {
+    if (!checkbox) return;
+    const scale = window.innerWidth > 1200 ? 1.45 : window.innerWidth > 800 ? 1.35 : 1.15;
+    const labelEl = checkbox.closest("label");
+    if (labelEl) labelEl.style.transform = `scale(${scale})`;
+  }
+  window.addEventListener("resize", updateCheckboxScale);
+  updateCheckboxScale();
 
   (function setupBgPlayButton(){
     const bg = document.getElementById("bgVideo");
@@ -260,6 +268,7 @@ document.addEventListener("DOMContentLoaded", () => {
       textInput.style.height = "auto";
       textInput.style.height = textInput.scrollHeight + "px";
     });
+    textInput.dispatchEvent(new Event("input"));
   }
 
   // Show/hide email input
@@ -278,14 +287,22 @@ document.addEventListener("DOMContentLoaded", () => {
   function sendText(){
     const text = textInput.value.trim();
     const wantsFeedback = checkbox.checked;
-    const email = wantsFeedback ? emailInput.value.trim() : null;
+    let email = null;
+    if (wantsFeedback && emailInput) {
+      const v = emailInput.value.trim();
+      if (v) {
+        email = v;
+      } else {
+        // no email provided — treat as no feedback requested
+        if (checkbox) checkbox.checked = false;
+        if (emailInput) { emailInput.value = ""; emailInput.style.display = "none"; }
+      }
+    }
     if(text){
       socket.emit("newText", { text, email });
-      textInput.value = "";
-      textInput.style.height = "auto";
-      checkbox.checked = false;
-      emailInput.value = "";
-      emailInput.style.display = "none";
+      if (textInput) { textInput.value = ""; textInput.style.height = "auto"; }
+      if (checkbox) checkbox.checked = false;
+      if (emailInput) { emailInput.value = ""; emailInput.style.display = "none"; }
     }
   }
   window.sendText = sendText;
