@@ -98,16 +98,13 @@ body {
   object-position: 50% 50%; /* default center */
   bottom: calc(0px - env(safe-area-inset-bottom));
   background-color: #000; /* avoid visible gaps */
-  z-index: -1;
+  z-index: 0;
 }
 @media (orientation: portrait), (max-aspect-ratio: 3/4) {
   #bgVideo {
     object-position: 50% 28%;
     transform: none;
-    transform-origin: center top;
     will-change: object-position;
-    /* account for iOS safe area if needed */
-    padding-bottom: env(safe-area-inset-bottom);
   }
 }
 
