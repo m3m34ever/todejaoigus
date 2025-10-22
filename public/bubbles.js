@@ -27,17 +27,23 @@ function createShip(msg) {
   const div = document.createElement("div");
   div.className = "ship";
 
-  // Right-click to delete (only in admin mode)
-div.addEventListener("contextmenu", (e) => {
-  e.preventDefault();
-  if (!adminMode) return; // only allow if admin
+  // store text for dedupe and admin handling 
+  div.dataset.text = msg.text || "";
+  div.dataset.hasEmail = msg.hasEmail ? "1" : "0";
+  // safe preview text
+  const previewText = (msg && msg.text) ? String(msg.text) : "";
 
-  const confirmDelete = confirm("Delete this ship from view?");
-  if (confirmDelete) {
-    div.remove(); // remove from DOM
-    ships = ships.filter(s => s !== div);
-  }
-});
+  // Right-click to delete (only in admin mode)
+  div.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    if (!adminMode) return; // only allow if admin
+
+    const confirmDelete = confirm("Delete this ship from view?");
+    if (confirmDelete) {
+      div.remove(); // remove from DOM
+      ships = ships.filter(s => s !== div);
+    }
+  });
 
   // Random initial position
   div.x = Math.random() * (window.innerWidth - 100);
@@ -100,7 +106,7 @@ div.addEventListener("contextmenu", (e) => {
   // Text preview under the ship
   const preview = document.createElement("div");
   preview.className = "ship-preview";
-  preview.innerText = msg.text.length > 10 ? msg.text.slice(0,10) + "…" : msg.text;
+  preview.innerText = previewText.length > 10 ? previewText.slice(0,10) + "…" : previewText;
   preview.style.position = "absolute";
   preview.style.top = s + "px";  // below the ship
   preview.style.left = "50%";
@@ -115,6 +121,7 @@ div.addEventListener("contextmenu", (e) => {
 
   document.body.appendChild(div);
   ships.push(div);
+  return div;
 }
 
 // Overlay for full text
@@ -164,31 +171,108 @@ function animateShips(){
 
 document.addEventListener("DOMContentLoaded", () => {
   const socket = io();
-
   const textInput = document.getElementById("textInput");
   const checkbox = document.getElementById("feedbackCheckbox");
   const emailInput = document.getElementById("emailInput");
 
-  if (!textInput || !checkbox || !emailInput) {
-    console.warn("bubbles.js: required DOM elements missing; aborting UI init");
-    return;
+
+  (function setupBgPlayButton(){
+    const bg = document.getElementById("bgVideo");
+    if (!bg) return;
+    // prefer an existing button in HTML, otherwise create one
+    let btn = document.getElementById("bgPlayBtn");
+    if (!btn) {
+      btn = document.createElement("button");
+      btn.id = "bgPlayBtn";
+      btn.textContent = "Play background";
+      Object.assign(btn.style, {
+        display: "none",
+        position: "fixed",
+        right: "12px",
+        top: "12px",
+        zIndex: "10001",
+        background: "rgba(0,0,0,0.6)",
+        color: "#fff",
+        border: "none",
+        padding: "8px 12px",
+        borderRadius: "6px",
+        cursor: "pointer",
+        fontSize: "13px"
+      });
+      document.body.appendChild(btn);
+    }
+
+    // ensure muted to maximize autoplay chance
+    try { bg.muted = true; } catch (e) { /* ignore */ }
+
+    const isPlaying = () => !!(bg && !bg.paused && !bg.ended && bg.readyState > 2);
+    const update = () => { btn.style.display = isPlaying() ? "none" : "block"; };
+
+    const tryPlay = async () => {
+      try {
+        // ensure muted just before play attempt
+        bg.muted = true;
+        await bg.play();
+      } catch (err) {
+        // autoplay blocked — nothing to do, update will show button
+      } finally {
+        update();
+      }
+    };
+
+    // keep visibility in sync with playback state
+    ["play","playing","pause","ended","loadeddata","canplay"].forEach(ev => bg.addEventListener(ev, update));
+
+    // initial attempt and UI update
+    update();
+    tryPlay();
+
+    // try again after first user gesture (some browsers relax autoplay after gesture)
+    const onFirstGesture = () => { tryPlay(); window.removeEventListener("pointerdown", onFirstGesture); window.removeEventListener("touchstart", onFirstGesture); };
+    window.addEventListener("pointerdown", onFirstGesture, { once: true });
+    window.addEventListener("touchstart", onFirstGesture, { once: true });
+
+    // button triggers a user-gesture play attempt
+    btn.addEventListener("click", async () => {
+      try {
+        await bg.play();
+      } catch (e) {
+        alert("Cannot play background due to browser restrictions.");
+      } finally {
+        update();
+      }
+    });
+  })();
+
+  if (textInput) {
+    const resizeInput = () => {
+      textInput.style.width = Math.min(window.innerWidth * 0.85, 900) + "px";
+      textInput.style.fontSize = (window.innerWidth < 420) ? "14px" : "";
+    };
+    window.addEventListener("resize", resizeInput);
+    resizeInput();
   }
 
+
   // Auto-expand text area
-  textInput.addEventListener("input", () => {
-    textInput.style.height = "auto";
-    textInput.style.height = textInput.scrollHeight + "px";
-  });
+  if (textInput) {
+    textInput.addEventListener("input", () => {
+      textInput.style.height = "auto";
+      textInput.style.height = textInput.scrollHeight + "px";
+    });
+  }
 
   // Show/hide email input
-  checkbox.addEventListener("change", () => {
-    if (checkbox.checked) {
-      emailInput.style.display = "block";
-    } else {
-      emailInput.style.display = "none";
-      emailInput.value = "";
-    }
-  });
+  if (checkbox && emailInput) {
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) {
+        emailInput.style.display = "block";
+      } else {
+        emailInput.style.display = "none";
+        emailInput.value = "";
+      }
+    });
+  }
 
   // Send text
   function sendText(){
@@ -223,7 +307,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   socket.on("newText", (msg) => {
     const last = messages[messages.length - 1];
-    if (last && last.text === msg.text && last.email === msg.email) {
+    if (last && last.text === msg.text && last.hasEmail === msg.hasEmail) {
       return; // duplicate, ignore
     }
 
