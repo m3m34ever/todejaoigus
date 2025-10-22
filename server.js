@@ -5,8 +5,45 @@ import { Server } from "socket.io";
 import fs from "fs";
 import dotenv from "dotenv";
 import path from "path";
+import nodemailer from "nodemailer";
 
 dotenv.config();
+
+const NOTIFY_LIST = (process.env.NOTIFY_LIST || "").split(",").map(s => s.trim()).filter(Boolean); // recipients
+const EMAIL_FROM = process.env.EMAIL_FROM || `no-reply@${process.env.DOMAIN || "example.com"}`;
+let mailer;
+if (process.env.EMAIL_SMTP_HOST && process.env.EMAIL_SMTP_USER) {
+  mailer = nodemailer.createTransport({
+    host: process.env.EMAIL_SMTP_HOST,
+    port: parseInt(process.env.EMAIL_SMTP_PORT || "587", 10),
+    secure: process.env.EMAIL_SMTP_SECURE === 'true',
+    auth: {
+      user: process.env.EMAIL_SMTP_USER,
+      pass: process.env.EMAIL_SMTP_PASS || ''
+    }
+  });
+} else {
+  mailer = null;
+}
+
+function sendNotificationEmail(msg) {
+  if (!mailer || NOTIFY_LIST.length === 0) return;
+  const subject = `New feedback message received from ${msg.email || 'anonymous'}`;
+  const body = `Message:\n\n${msg.text}\n\nUser-supplied email: ${msg.email || "(none)"}\n\nLogged at: ${msg.time}\n`;
+  const mail = {
+    from: EMAIL_FROM,
+    to: NOTIFY_LIST.join(","),
+    subject: subject,
+    text: body
+  };
+  mailer.sendMail(mail, (err, info) => {
+    if (err) {
+      console.error("Error sending notification email:", err);
+    } else {
+      console.log("Notification email sent:", info);
+    }
+  });
+}
 
 const app = express();
 app.set('trust proxy', true);
@@ -163,6 +200,7 @@ io.on("connection", (socket) => {
     }
     console.log(`[NEW MESSAGE] ${msg.text}` + (msg.ip ? ` (from ${msg.ip})` : ''));
     if (msg.email) console.log(`  Feedback email: ${msg.email}`);
+    try { sendNotificationEmail(msg); } catch (e) { console.error("sendNotificationEmail threw:", e && e.message); }
   });
   socket.on("disconnect", () => {
     console.log("A user disconnected", ip ? `from IP: ${ip}` : '');
