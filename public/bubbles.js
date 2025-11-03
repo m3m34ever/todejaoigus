@@ -5,6 +5,7 @@ let messages = [];
 let circleOverlayEl = null;
 let _savedInputDisplay = null;
 let zResizeMode = false;
+let loopResetInProgress = false;
 
 let circleState = {
   sizeVmin: 100,    // initial circle size in vmin (matches CSS)
@@ -746,24 +747,82 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Force seamless looping for Chrome/Safari
   bg.addEventListener("timeupdate", () => {
-    // Loop seamlessly by resetting to start slightly before the end
-    if (bg.duration > 0 && bg.currentTime >= bg.duration - 0.1) {
+    // More aggressive reset for Safari - catch it earlier
+    if (bg.duration > 0 && bg.currentTime >= bg.duration - 0.2 && !loopResetInProgress) {
+      loopResetInProgress = true;
       bg.currentTime = 0;
+      // Give Safari time to process the reset
+      setTimeout(() => { loopResetInProgress = false; }, 100);
     }
   });
 
-  // Additional event listeners to handle loop edge cases
+  // Additional Safari-specific loop handling
   bg.addEventListener("ended", () => {
-    bg.currentTime = 0;
-    bg.play().catch(() => {});
+    if (!loopResetInProgress) {
+      loopResetInProgress = true;
+      bg.currentTime = 0;
+      bg.play().catch(() => {});
+      setTimeout(() => { loopResetInProgress = false; }, 100);
+    }
   });
 
-  // Ensure smooth playback on Chrome/Safari
+  // Safari sometimes fires 'stalled' during loop transitions
+  bg.addEventListener("stalled", () => {
+    if (bg.readyState >= 2 && !bg.paused) {
+      // Video has data but playback stalled - try to resume
+      setTimeout(() => {
+        if (!bg.paused && bg.currentTime === bg.duration) {
+          bg.currentTime = 0;
+          bg.play().catch(() => {});
+        }
+      }, 50);
+    }
+  });
+
+  // Ensure smooth playback settings for Safari
   bg.addEventListener("loadeddata", () => {
-    // Set playback rate to ensure smooth looping
     try {
       bg.playbackRate = 1.0;
+      // Safari-specific: ensure the video is ready for seamless looping
+      if (bg.duration > 0) {
+        bg.currentTime = 0; // Start from beginning
+      }
     } catch (e) {}
+  });
+
+  // Safari sometimes benefits from manual loop detection
+  bg.addEventListener("loadedmetadata", () => {
+    // Ensure loop attribute is properly set for Safari
+    bg.loop = true;
+  });
+  let lastTime = 0;
+  function safariLoopMonitor() {
+    if (bg && bg.duration > 0 && !bg.paused && !bg.ended) {
+      const currentTime = bg.currentTime;
+      
+      // Detect if we're very close to the end or if time hasn't progressed
+      if (currentTime >= bg.duration - 0.1 || 
+          (currentTime > 0 && Math.abs(currentTime - lastTime) < 0.01 && currentTime > bg.duration - 0.5)) {
+        if (!loopResetInProgress) {
+          console.log("[SAFARI] Manual loop reset triggered");
+          loopResetInProgress = true;
+          bg.currentTime = 0;
+          setTimeout(() => { loopResetInProgress = false; }, 150);
+        }
+      }
+      
+      lastTime = currentTime;
+    }
+    
+    requestAnimationFrame(safariLoopMonitor);
+  }
+  
+  // Start Safari monitoring when video is playing
+  bg.addEventListener("playing", () => {
+    if (!bg.dataset.safariMonitorStarted) {
+      bg.dataset.safariMonitorStarted = "true";
+      safariLoopMonitor();
+    }
   });
 
     setTimeout(() => {
