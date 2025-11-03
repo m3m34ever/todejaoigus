@@ -743,43 +743,71 @@ document.addEventListener("DOMContentLoaded", () => {
         update();
       }
     });
-setTimeout(() => {
+    setTimeout(() => {
       if (typeof bg.getVideoPlaybackQuality === "function") {
-        console.log("[BG VIDEO] Starting quality monitor...");
-        let lastTotal = 0;
-        let lastDropped = 0;
-        let monitorStarted = false;
+        console.log("[BG VIDEO] Will start quality monitor in 10 seconds...");
         
-        const monitorInterval = setInterval(() => {
-          if (!bg || bg.paused || bg.ended) return;
-          if (!monitorStarted && bg.readyState >= 2) monitorStarted = true;
-          if (!monitorStarted) return;
+        // Wait 10 seconds before starting monitoring
+        setTimeout(() => {
+          console.log("[BG VIDEO] Starting quality monitor...");
+          let lastTotal = 0;
+          let lastDropped = 0;
+          let monitorStarted = false;
+          let samples = [];
+          const minSamplesBeforeSwitch = 3; // At least 3 samples (30 seconds) before switching
           
-          try {
-            const q = bg.getVideoPlaybackQuality();
-            const total = q.totalVideoFrames || 0;
-            const dropped = q.droppedVideoFrames || 0;
-            const totalDelta = total - lastTotal;
-            const droppedDelta = dropped - lastDropped;
-            lastTotal = total; lastDropped = dropped;
+          const monitorInterval = setInterval(() => {
+            if (!bg || bg.paused || bg.ended) return;
+            if (!monitorStarted && bg.readyState >= 2) monitorStarted = true;
+            if (!monitorStarted) return;
             
-            if (totalDelta > 0) {
-              const fps = totalDelta / 3;
-              const dropRatio = droppedDelta / Math.max(1, totalDelta);
-              console.log(`[BG VIDEO] FPS: ${fps.toFixed(1)}, Drop ratio: ${(dropRatio*100).toFixed(1)}%, Current: ${videoVariants[currentBgVariant].src}`);
+            try {
+              const q = bg.getVideoPlaybackQuality();
+              const total = q.totalVideoFrames || 0;
+              const dropped = q.droppedVideoFrames || 0;
+              const totalDelta = total - lastTotal;
+              const droppedDelta = dropped - lastDropped;
+              lastTotal = total; lastDropped = dropped;
               
-              if ((fps < 20 || dropRatio > 0.12) && !switchedDueToChoppy && currentBgVariant < videoVariants.length - 1) {
-                console.log(`[BG VIDEO] Performance issue detected - switching down`);
-                switchedDueToChoppy = true;
-                setBgVideoVariant(currentBgVariant + 1, "performance");
+              if (totalDelta > 0) {
+                const fps = totalDelta / 3;
+                const dropRatio = droppedDelta / Math.max(1, totalDelta);
+                
+                // Store sample for averaging
+                samples.push({ fps, dropRatio });
+                
+                console.log(`[BG VIDEO] FPS: ${fps.toFixed(1)}, Drop ratio: ${(dropRatio*100).toFixed(1)}%, Samples: ${samples.length}/${minSamplesBeforeSwitch}, Current: ${videoVariants[currentBgVariant].src}`);
+                
+                // Only consider switching after we have enough samples (at least 30 seconds of data)
+                if (samples.length >= minSamplesBeforeSwitch) {
+                  // Calculate averages over the collected samples
+                  const avgFps = samples.reduce((sum, s) => sum + s.fps, 0) / samples.length;
+                  const avgDropRatio = samples.reduce((sum, s) => sum + s.dropRatio, 0) / samples.length;
+                  
+                  console.log(`[BG VIDEO] Average over ${samples.length} samples: FPS: ${avgFps.toFixed(1)}, Drop ratio: ${(avgDropRatio*100).toFixed(1)}%`);
+                  
+                  if ((avgFps < 17 || avgDropRatio > 0.24) && !switchedDueToChoppy && currentBgVariant < videoVariants.length - 1) {
+                    console.log(`[BG VIDEO] Performance issue detected based on averages - switching down`);
+                    switchedDueToChoppy = true;
+                    setBgVideoVariant(currentBgVariant + 1, "performance");
+                    // Reset samples after switching
+                    samples = [];
+                  }
+                  
+                  // Keep only the last 10 samples (sliding window of ~30 seconds)
+                  if (samples.length > 10) {
+                    samples = samples.slice(-10);
+                  }
+                }
               }
+            } catch (e) { 
+              console.error("[BG VIDEO] Quality monitoring error:", e);
             }
-          } catch (e) { 
-            console.error("[BG VIDEO] Quality monitoring error:", e);
-          }
-        }, 3000);
+          }, 3000); // Still check every 3 seconds
+          
+        }, 10000); // Wait 10 seconds before starting monitoring
       }
-    }, 1000);
+    }, 1000); // delay to ensure bg is ready
 
     window.__setBgVideoVariant = (i) => { setBgVideoVariant(i, "manual"); };
   })();
