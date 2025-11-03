@@ -14,6 +14,52 @@ let circleState = {
   skewY: 0         // deg
 };
 
+let _cursorHideTimer = null;
+let _cursorAutoHideListeners = null;
+function _showCursor() {
+  try { document.body.style.cursor = ""; } catch (e) {}
+}
+function _hideCursor() {
+  try { document.body.style.cursor = "none"; } catch (e) {}
+}
+function _activityHandler() {
+  // always show on activity
+  _showCursor();
+  if (_cursorHideTimer) clearTimeout(_cursorHideTimer);
+  // only schedule hide if circle overlay is active and we're fullscreen
+  if (circleOverlayEl && circleOverlayEl.classList.contains("active") && document.fullscreenElement) {
+    _cursorHideTimer = setTimeout(() => {
+      _hideCursor();
+    }, 3000);
+  }
+}
+function enableCursorAutoHide() {
+  // avoid duplicate listeners
+  if (_cursorAutoHideListeners) return;
+  _activityHandler(); // start visible then schedule hide
+  _cursorAutoHideListeners = {
+    move: _activityHandler,
+    down: _activityHandler,
+    touch: _activityHandler,
+    key: _activityHandler
+  };
+  window.addEventListener("mousemove", _cursorAutoHideListeners.move, { passive: true });
+  window.addEventListener("pointerdown", _cursorAutoHideListeners.down, { passive: true });
+  window.addEventListener("touchstart", _cursorAutoHideListeners.touch, { passive: true });
+  window.addEventListener("keydown", _cursorAutoHideListeners.key, { passive: true });
+}
+function disableCursorAutoHide() {
+  if (_cursorHideTimer) { clearTimeout(_cursorHideTimer); _cursorHideTimer = null; }
+  if (_cursorAutoHideListeners) {
+    window.removeEventListener("mousemove", _cursorAutoHideListeners.move);
+    window.removeEventListener("pointerdown", _cursorAutoHideListeners.down);
+    window.removeEventListener("touchstart", _cursorAutoHideListeners.touch);
+    window.removeEventListener("keydown", _cursorAutoHideListeners.key);
+    _cursorAutoHideListeners = null;
+  }
+  _showCursor();
+}
+
 try {
   const saved = localStorage.getItem("messages");
   messages = saved ? JSON.parse(saved) : [];
@@ -33,6 +79,43 @@ function clearShips() {
   }
   ships = [];
 }
+
+try {
+  const savedCS = localStorage.getItem("circleState");
+  if (savedCS) {
+    const parsed = JSON.parse(savedCS);
+    if (parsed && typeof parsed === "object") {
+      // only accept numeric fields to avoid bad values
+      if (typeof parsed.sizeVmin === "number") circleState.sizeVmin = parsed.sizeVmin;
+      if (typeof parsed.left === "number") circleState.left = parsed.left;
+      if (typeof parsed.top === "number") circleState.top = parsed.top;
+      if (typeof parsed.skewX === "number") circleState.skewX = parsed.skewX;
+      if (typeof parsed.skewY === "number") circleState.skewY = parsed.skewY;
+    }
+  }
+} catch (e) { /* ignore */ }
+
+// ...existing code...
+
+// in updateCircleStyles(), after applying styles add persistence:
+  // apply dimensions and position
+  circle.style.width = `${circleState.sizeVmin}vmin`;
+  circle.style.height = `${circleState.sizeVmin}vmin`;
+  circle.style.left = `${Math.round(circleState.left)}px`;
+  circle.style.top = `${Math.round(circleState.top)}px`;
+  // apply skew transform (keep center)
+  circle.style.transform = `skew(${circleState.skewX}deg, ${circleState.skewY}deg)`;
+
+  // persist circle state
+  try {
+    localStorage.setItem("circleState", JSON.stringify({
+      sizeVmin: circleState.sizeVmin,
+      left: Math.round(circleState.left),
+      top: Math.round(circleState.top),
+      skewX: circleState.skewX,
+      skewY: circleState.skewY
+    }));
+  } catch (e) { /* ignore */ }
 
 // Create a new ship
 function createShip(msg, container = document.body) {
@@ -221,128 +304,143 @@ function createCircleOverlay() {
   if (bgVideo) {
     const videoVariants = [
       { src: "background.mp4", width: 1920 },      // high quality (index 0)
-      { src: "background-720.mp4", width: 1280 }   // fallback (index 1)
-    ];
+      { src: "background-720.mp4", width: 1280 },   // fallback (index 1)
+      { src: "background-480.mp4",  width: 854  }
+  ];
 
-    // choose initial variant (prefer high, but pick 720 for slow connections / weak devices)
-    function chooseInitialVariantIndex() {
-      try {
-        const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
-        const eff = conn && conn.effectiveType ? conn.effectiveType : null;
-        const deviceMem = navigator.deviceMemory || 4;
-        if (eff && (eff.includes("2g") || eff.includes("3g") || eff === "slow-2g")) return 1;
-        if (deviceMem <= 1) return 1;
-        return 0;
-      } catch (e) { return 0; }
+  // choose initial variant based on connection / device hints
+  function chooseInitialVariantIndex() {
+    try {
+      const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+      const eff = conn && conn.effectiveType ? conn.effectiveType : null;
+      const deviceMem = navigator.deviceMemory || 4;
+      if (eff && (eff.includes("2g") || eff.includes("3g") || eff === "slow-2g")) return 2;
+      if (deviceMem <= 1) return 1;
+      return 0;
+    } catch (e) { return 0; }
+  }
+
+  let currentVariant = chooseInitialVariantIndex();
+  let switchedDueToChoppy = false;
+
+  function setVideoVariant(idx) {
+    if (!bgVideo) return;
+    idx = Math.max(0, Math.min(videoVariants.length - 1, idx));
+    if (currentVariant === idx) return;
+    currentVariant = idx;
+    const prevPaused = bgVideo.paused;
+    try {
+      bgVideo.pause();
+      bgVideo.src = videoVariants[idx].src;
+      bgVideo.load();
+      // small delay then attempt play (user gesture restrictions apply)
+      setTimeout(() => bgVideo.play().catch(()=>{}), 50);
+      if (prevPaused) bgVideo.pause(); // respect previous paused state
+    } catch (e) {
+      console.error("Failed to switch video variant:", e);
     }
+  }
 
-    let currentVariant = chooseInitialVariantIndex();
-    let switchedToLower = false;
-
-    async function setBgVariant(idx) {
-      idx = Math.max(0, Math.min(videoVariants.length - 1, idx));
-      if (currentVariant === idx) return;
-      currentVariant = idx;
-      const wasPaused = bgVideo.paused;
-      try {
-        bgVideo.pause();
-        bgVideo.src = videoVariants[idx].src;
-        bgVideo.load();
-        // try to keep autoplay/playing if it was playing
-        if (!wasPaused) await bgVideo.play().catch(()=>{});
-      } catch (e) { /* ignore */ }
-    }
-
-    // init src
+  // initialize src if multiple variants present (pick initial)
+  if (videoVariants && videoVariants.length > 0 && bgVideo) {
     bgVideo.src = videoVariants[currentVariant].src;
+  }
 
-    // monitor playback quality and switch down only once if choppy
-    (function startMonitor() {
-      const intervalMs = 3000;
-      const lowFpsThreshold = 20;
-      // modern: requestVideoFrameCallback
-      if (typeof bgVideo.requestVideoFrameCallback === "function") {
-        let frameCount = 0, firstTs = null;
-        function frameCb(now) {
-          frameCount++;
-          if (!firstTs) firstTs = now;
-          const elapsed = now - firstTs;
-          if (elapsed >= intervalMs) {
-            const fps = (frameCount / (elapsed/1000));
-            frameCount = 0; firstTs = null;
-            if (fps < lowFpsThreshold && !switchedToLower && currentVariant < videoVariants.length - 1) {
-              switchedToLower = true;
-              setBgVariant(currentVariant + 1);
-            }
-          }
-          try { bgVideo.requestVideoFrameCallback(frameCb); } catch(e){/*ignore*/}
-        }
-        try { bgVideo.requestVideoFrameCallback(frameCb); } catch(e){/*ignore*/}
-        return;
-      }
+  // Monitor playback quality and switch down once if choppy.
+  (function startVideoQualityMonitor(){
+  if (!bgVideo) return;
+  const intervalMs = 3000;
+  const lowFpsThreshold = 20; // adjust to taste
+  let switched = false;
 
-      // fallback: getVideoPlaybackQuality
-      if (typeof bgVideo.getVideoPlaybackQuality === "function") {
-        let lastTotal = 0;
-        setInterval(() => {
-          try {
-            const q = bgVideo.getVideoPlaybackQuality();
-            const total = q.totalVideoFrames || 0;
-            const totalDelta = total - lastTotal;
-            lastTotal = total;
-            if (totalDelta > 0) {
-              const fps = (totalDelta / (intervalMs/1000));
-              if (fps < lowFpsThreshold && !switchedToLower && currentVariant < videoVariants.length - 1) {
-                switchedToLower = true;
-                setBgVariant(currentVariant + 1);
-              }
-            }
-          } catch (e) {}
-        }, intervalMs);
-        return;
-      }
-
-      // older fallback: webkitDecodedFrameCount
-      if ('webkitDecodedFrameCount' in bgVideo) {
-        let lastDecoded = bgVideo.webkitDecodedFrameCount || 0;
-        setInterval(() => {
-          try {
-            const decoded = bgVideo.webkitDecodedFrameCount || 0;
-            const delta = decoded - lastDecoded;
-            lastDecoded = decoded;
-            const fps = delta / (intervalMs/1000);
-            if (fps < lowFpsThreshold && !switchedToLower && currentVariant < videoVariants.length - 1) {
-              switchedToLower = true;
-              setBgVariant(currentVariant + 1);
-            }
-          } catch(e){}
-        }, intervalMs);
-        return;
-      }
-
-      // last fallback: simple rAF heuristic
-      let rafCount = 0;
-      let lastTime = bgVideo.currentTime || 0;
-      function rafLoop() {
-        rafCount++;
-        const nowTime = bgVideo.currentTime || 0;
-        const dt = nowTime - lastTime;
-        if (dt >= 1.0) {
-          const fps = rafCount / dt;
-          rafCount = 0;
-          lastTime = nowTime;
-          if (fps < lowFpsThreshold && !switchedToLower && currentVariant < videoVariants.length - 1) {
-            switchedToLower = true;
-            setBgVariant(currentVariant + 1);
+  // Primary: use getVideoPlaybackQuality if available (gives decoded/dropped frames)
+  if (typeof bgVideo.getVideoPlaybackQuality === "function") {
+    let lastTotal = 0;
+    let lastDropped = 0;
+    setInterval(() => {
+      try {
+        const q = bgVideo.getVideoPlaybackQuality();
+        const total = q.totalVideoFrames || 0;
+        const dropped = q.droppedVideoFrames || 0;
+        const totalDelta = total - lastTotal;
+        const droppedDelta = dropped - lastDropped;
+        lastTotal = total; lastDropped = dropped;
+        if (totalDelta > 0) {
+          const fps = totalDelta / (intervalMs/1000);
+          const dropRatio = droppedDelta / Math.max(1, totalDelta);
+          if ((fps < lowFpsThreshold || dropRatio > 0.12) && !switched && currentVariant < videoVariants.length - 1) {
+            switched = true;
+            setVideoVariant(currentVariant + 1);
           }
         }
-        requestAnimationFrame(rafLoop);
-      }
-      requestAnimationFrame(rafLoop);
-    })();
+      } catch (e) { /* ignore */ }
+    }, intervalMs);
+    return;
+  }
 
-    // debugging helper
-    window.__setBackgroundVariant = (i) => { setBgVariant(i); };
+  // Secondary: requestVideoFrameCallback — compute FPS from timestamps
+  if (typeof bgVideo.requestVideoFrameCallback === "function") {
+    let frameCount = 0;
+    let firstTs = null;
+    function frameCb(now, meta) {
+      frameCount++;
+      if (!firstTs) firstTs = now;
+      const elapsed = now - firstTs;
+      if (elapsed >= intervalMs) {
+        const fps = frameCount / (elapsed/1000);
+        frameCount = 0; firstTs = null;
+        if (fps < lowFpsThreshold && !switched && currentVariant < videoVariants.length - 1) {
+          switched = true;
+          setVideoVariant(currentVariant + 1);
+        }
+      }
+      try { bgVideo.requestVideoFrameCallback(frameCb); } catch(e){ /* ignore */ }
+    }
+    try { bgVideo.requestVideoFrameCallback(frameCb); } catch(e){}
+    return;
+  }
+
+  // Tertiary: webkitDecodedFrameCount fallback
+  if ('webkitDecodedFrameCount' in bgVideo) {
+    let last = bgVideo.webkitDecodedFrameCount || 0;
+    setInterval(() => {
+      try {
+        const curr = bgVideo.webkitDecodedFrameCount || 0;
+        const delta = curr - last;
+        last = curr;
+        const fps = delta / (intervalMs/1000);
+        if (fps < lowFpsThreshold && !switched && currentVariant < videoVariants.length - 1) {
+          switched = true;
+          setVideoVariant(currentVariant + 1);
+        }
+      } catch(e){}
+    }, intervalMs);
+    return;
+  }
+
+  // Final fallback: rAF heuristic
+  let rafCount = 0;
+  let lastTime = bgVideo.currentTime || 0;
+  function rafLoop() {
+    rafCount++;
+    const nowTime = bgVideo.currentTime || 0;
+    const dt = nowTime - lastTime;
+    if (dt >= 1.0) {
+      const fps = rafCount / dt;
+      rafCount = 0;
+      lastTime = nowTime;
+      if (fps < lowFpsThreshold && !switched && currentVariant < videoVariants.length - 1) {
+        switched = true;
+        setVideoVariant(currentVariant + 1);
+      }
+    }
+    requestAnimationFrame(rafLoop);
+  }
+  requestAnimationFrame(rafLoop);
+  })();
+
+  // Expose a debug function to force variant in console
+  window.__setBackgroundVariant = (i) => { setVideoVariant(i); };
   }
   if (bgVideo && bgVideo instanceof HTMLVideoElement) {
     const v = document.createElement("video");
@@ -433,6 +531,7 @@ async function toggleCircleMode(force) {
     el.classList.add("active");
     if (typeof centerCircle === "function") centerCircle();
     if (typeof updateCircleStyles === "function") updateCircleStyles();
+    enableCursorAutoHide();
 
     // hide original ships
     for (const s of ships) s.style.display = "none";
@@ -489,9 +588,21 @@ async function toggleCircleMode(force) {
     // restore original ships and input UI
     for (const s of ships) s.style.display = "";
     if (inputBox) {
-      inputBox.style.display = (_savedInputDisplay === "") ? "" : _savedInputDisplay;
+      // If we saved an explicit non-"none" display value, restore it.
+      // Otherwise fall back to empty string to allow CSS to show it.
+      inputBox.style.display = (_savedInputDisplay && _savedInputDisplay !== "none")
+        ? _savedInputDisplay
+        : "";
       _savedInputDisplay = null;
+    } else {
+      // fallback: ensure the main text input is visible if wrapper missing
+      const t = document.getElementById("textInput");
+      if (t) t.style.display = "";
     }
+    // also ensure textInput is shown (defensive)
+    const t2 = document.getElementById("textInput");
+    if (t2) t2.style.display = "";
+    disableCursorAutoHide();
     el.classList.remove("active");
   }
 }
