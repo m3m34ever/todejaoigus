@@ -5,6 +5,14 @@ let messages = [];
 let circleOverlayEl = null;
 let _savedInputDisplay = null;
 
+let circleState = {
+  sizeVmin: 85,    // initial circle size in vmin (matches CSS)
+  left: null,      // px from left of viewport
+  top: null,       // px from top of viewport
+  skewX: 0,        // deg
+  skewY: 0         // deg
+};
+
 try {
   const saved = localStorage.getItem("messages");
   messages = saved ? JSON.parse(saved) : [];
@@ -191,11 +199,23 @@ function createCircleOverlay() {
   overlay.id = "circleOverlay";
   const circle = document.createElement("div");
   circle.className = "circle";
-  circle.style.position = "relative";
+
+  circle.style.position = "absolute";
+  circle.style.left = circle.style.left || "0px";
+  circle.style.top = circle.style.top || "0px";
+  circle.style.boxSizing = "border-box";
+  circle.style.borderRadius = "50%";
   circle.style.overflow = "hidden";
-  circle.style.zIndex = "2"; 
-  overlay.appendChild(circle);
+  // initialize circleState positions if not set
+  const vminPx = Math.min(window.innerWidth, window.innerHeight) / 100;
+  const sizePx = circleState.sizeVmin * vminPx;
+  const paddingPx = 12 * vminPx; // match CSS padding:12vmin
+  if (circleState.left === null) circleState.left = paddingPx;
+  if (circleState.top === null) circleState.top = Math.max(8, window.innerHeight - paddingPx - sizePx);
+  // apply initial styles
+  if (typeof updateCircleStyles === "function") updateCircleStyles();
   
+  overlay.appendChild(circle);
 
   const bg = document.getElementById("bgVideo");
   if (bg && bg instanceof HTMLVideoElement) {
@@ -224,29 +244,58 @@ function createCircleOverlay() {
   return overlay;
 }
 
+function updateCircleStyles(){
+  if (!circleOverlayEl) return;
+  const circle = circleOverlayEl.querySelector(".circle");
+  if (!circle) return;
+  const vminPx = Math.min(window.innerWidth, window.innerHeight) / 100;
+  const sizePx = Math.max(10, Math.min(200, circleState.sizeVmin)) * vminPx;
+  // enforce bounds: keep circle within viewport
+  circleState.left = Math.max(0, Math.min(window.innerWidth - sizePx, circleState.left));
+  circleState.top = Math.max(0, Math.min(window.innerHeight - sizePx, circleState.top));
+  // apply dimensions and position
+  circle.style.width = `${circleState.sizeVmin}vmin`;
+  circle.style.height = `${circleState.sizeVmin}vmin`;
+  circle.style.left = `${Math.round(circleState.left)}px`;
+  circle.style.top = `${Math.round(circleState.top)}px`;
+  // apply skew transform (keep center)
+  circle.style.transform = `skew(${circleState.skewX}deg, ${circleState.skewY}deg)`;
+}
+
+// ...existing code...
 function toggleCircleMode(force) {
   const el = createCircleOverlay();
   const circle = el.querySelector(".circle");
   const isActive = el.classList.contains("active");
   const shouldActivate = (typeof force === "boolean") ? force : !isActive;
   const inputBox = document.getElementById("inputBox");
+
   if (shouldActivate) {
+    // request fullscreen
     if (document.documentElement.requestFullscreen) {
       document.documentElement.requestFullscreen();
     } else if (document.documentElement.webkitRequestFullscreen) {
       document.documentElement.webkitRequestFullscreen();
     }
+
     if (inputBox) {
       _savedInputDisplay = inputBox.style.display || "";
       inputBox.style.display = "none";
     }
+
+    // mark overlay active and ensure circle gets correct inline sizing/position
+    el.classList.add("active");
+    if (typeof updateCircleStyles === "function") updateCircleStyles();
+
     // hide original ships
     for (const s of ships) s.style.display = "none";
+
+    // create clones inside circle (after circle has correct size)
     for (const m of messages) {
       createShip(m, circle);
     }
-    el.classList.add("active");
 
+    // start animation loop for circleShips
     if (!window._circleAnimating) {
       window._circleAnimating = true;
       (function animateCircleShips(){
@@ -258,6 +307,7 @@ function toggleCircleMode(force) {
           }
           div.x += div.vx + Math.sin(Date.now()*0.001 + div.x) * 0.2;
           div.y += div.vy + Math.cos(Date.now()*0.001 + div.y) * 0.2;
+
           // Keep inside circle bounds
           if (div.x < -80) div.x = rect.width;
           if (div.x > rect.width) div.x = -80;
@@ -273,18 +323,21 @@ function toggleCircleMode(force) {
       })();
     }
   } else {
+    // exit fullscreen
     if (document.exitFullscreen) {
       document.exitFullscreen();
     } else if (document.webkitExitFullscreen) {
       document.webkitExitFullscreen();
     }
-    // remove circle ships and show originals
+
+    // remove circle ships and stop animation
     for (const s of circleShips) {
       if (s && s.remove) s.remove();
     }
     circleShips = [];
     window._circleAnimating = false;
 
+    // restore original ships and input UI
     for (const s of ships) s.style.display = "";
     if (inputBox) {
       inputBox.style.display = (_savedInputDisplay === "") ? "" : _savedInputDisplay;
@@ -293,6 +346,7 @@ function toggleCircleMode(force) {
     el.classList.remove("active");
   }
 }
+// ...existing code...
 
 document.addEventListener("keydown", (e) => {
   if (e.ctrlKey && (e.key === "q" || e.key === "Q")) {
@@ -309,6 +363,48 @@ document.addEventListener("fullscreenchange", () => {
   if (!isFullscreen && circleActive) {
     toggleCircleMode(false);
   }
+});
+
+window.addEventListener("resize", () => {
+  // recompute top/left relative to new vmin if desired (keep px values, just clamp)
+  updateCircleStyles();
+});
+
+document.addEventListener("keydown", (e) => {
+  if (!circleOverlayEl || !circleOverlayEl.classList.contains("active")) return;
+  const arrowKeys = ["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"];
+  if (!arrowKeys.includes(e.key)) return;
+  // prevent page scroll
+  e.preventDefault();
+
+  const moveStep = 24;       // px per arrow
+  const resizeStepVmin = 2;  // vmin per ctrl+arrow
+  const skewStep = 3;        // degrees per shift+arrow
+
+  if (e.ctrlKey) {
+    // Resize: Up/Right -> increase, Down/Left -> decrease
+    const delta = (e.key === "ArrowUp" || e.key === "ArrowRight") ? resizeStepVmin : -resizeStepVmin;
+    circleState.sizeVmin = Math.max(10, Math.min(200, circleState.sizeVmin + delta));
+    updateCircleStyles();
+    return;
+  }
+
+  if (e.shiftKey) {
+    // Skew: Left/Right adjust skewX, Up/Down adjust skewY
+    if (e.key === "ArrowLeft") circleState.skewX = Math.max(-45, circleState.skewX - skewStep);
+    if (e.key === "ArrowRight") circleState.skewX = Math.min(45, circleState.skewX + skewStep);
+    if (e.key === "ArrowUp") circleState.skewY = Math.max(-45, circleState.skewY - skewStep);
+    if (e.key === "ArrowDown") circleState.skewY = Math.min(45, circleState.skewY + skewStep);
+    updateCircleStyles();
+    return;
+  }
+
+  // Move mode: arrow keys move the circle
+  if (e.key === "ArrowLeft") circleState.left -= moveStep;
+  if (e.key === "ArrowRight") circleState.left += moveStep;
+  if (e.key === "ArrowUp") circleState.top -= moveStep;
+  if (e.key === "ArrowDown") circleState.top += moveStep;
+  updateCircleStyles();
 });
 
 // Animate floating ships
