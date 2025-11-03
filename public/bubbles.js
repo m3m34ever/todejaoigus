@@ -804,8 +804,8 @@ document.addEventListener("DOMContentLoaded", () => {
               console.error("[BG VIDEO] Quality monitoring error:", e);
             }
           }, 3000); // Still check every 3 seconds
-          
-        }, 10000); // Wait 10 seconds before starting monitoring
+
+        }, 5000); // Wait 5 seconds before starting monitoring
       }
     }, 1000); // delay to ensure bg is ready
 
