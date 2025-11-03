@@ -13,6 +13,55 @@ let circleState = {
   skewX: 0,        // deg
   skewY: 0         // deg
 };
+const videoVariants = [
+  { src: "background.mp4", width: 1920 },
+  { src: "background-720.mp4", width: 1280 },
+  { src: "background-480.mp4", width: 854 }
+];
+
+function chooseInitialVariantIndex() {
+  try {
+    const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+    const eff = conn && conn.effectiveType ? conn.effectiveType : null;
+    const deviceMem = navigator.deviceMemory || 4;
+    if (eff && (eff.includes("2g") || eff.includes("3g") || eff === "slow-2g")) return 2;
+    if (deviceMem <= 1) return 1;
+    return 0;
+  } catch (e) { return 0; }
+}
+
+let currentBgVariant = chooseInitialVariantIndex();
+let switchedDueToChoppy = false;
+
+function setBgVideoVariant(idx, reason = "manual") {
+  const bgVideo = document.getElementById("bgVideo");
+  if (!bgVideo) return;
+  idx = Math.max(0, Math.min(videoVariants.length - 1, idx));
+  if (currentBgVariant === idx) return;
+  const prevVariant = currentBgVariant;
+  currentBgVariant = idx;
+  const wasPaused = bgVideo.paused;
+  try {
+    bgVideo.pause();
+    bgVideo.src = videoVariants[idx].src;
+    bgVideo.load();
+    if (!wasPaused) {
+      setTimeout(() => bgVideo.play().catch(()=>{}), 50);
+    }
+    
+    if (window.socket && window.socket.connected) {
+      window.socket.emit("videoQualityChange", {
+        from: videoVariants[prevVariant]?.src || "unknown",
+        to: videoVariants[idx].src,
+        reason: reason,
+        timestamp: new Date().toISOString()
+      });
+    }
+    console.log(`[VIDEO] Switched from ${videoVariants[prevVariant]?.src} to ${videoVariants[idx].src} (${reason})`);
+  } catch (e) {
+    console.error("Failed to switch video variant:", e);
+  }
+}
 
 let _cursorHideTimer = null;
 let _cursorAutoHideListeners = null;
@@ -268,169 +317,24 @@ function createCircleOverlay() {
   circle.style.boxSizing = "border-box";
   circle.style.borderRadius = "50%";
   circle.style.overflow = "hidden";
+  
   // initialize circleState positions if not set
   const vminPx = Math.min(window.innerWidth, window.innerHeight) / 100;
   const sizePx = circleState.sizeVmin * vminPx;
   if (circleState.left === null) circleState.left = Math.round((window.innerWidth - sizePx) / 2);
   if (circleState.top === null) circleState.top = Math.round((window.innerHeight - sizePx) / 2);
-  // apply initial styles
   if (typeof updateCircleStyles === "function") updateCircleStyles();
 
   overlay.appendChild(circle);
 
   const bgVideo = document.getElementById("bgVideo");
-  if (bgVideo) {
-    const videoVariants = [
-      { src: "background.mp4", width: 1920 },      // high quality (index 0)
-      { src: "background-720.mp4", width: 1280 },   // fallback (index 1)
-      { src: "background-480.mp4",  width: 854  }
-  ];
-
-  // choose initial variant based on connection / device hints
-  function chooseInitialVariantIndex() {
-    try {
-      const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
-      const eff = conn && conn.effectiveType ? conn.effectiveType : null;
-      const deviceMem = navigator.deviceMemory || 4;
-      if (eff && (eff.includes("2g") || eff.includes("3g") || eff === "slow-2g")) return 2;
-      if (deviceMem <= 1) return 1;
-      return 0;
-    } catch (e) { return 0; }
-  }
-
-  let currentVariant = chooseInitialVariantIndex();
-  let switchedDueToChoppy = false;
-
-  function setVideoVariant(idx) {
-    if (!bgVideo) return;
-    idx = Math.max(0, Math.min(videoVariants.length - 1, idx));
-    if (currentVariant === idx) return;
-    currentVariant = idx;
-    const prevPaused = bgVideo.paused;
-    try {
-      bgVideo.pause();
-      bgVideo.src = videoVariants[idx].src;
-      bgVideo.load();
-      // small delay then attempt play (user gesture restrictions apply)
-      setTimeout(() => bgVideo.play().catch(()=>{}), 50);
-      if (prevPaused) bgVideo.pause(); // respect previous paused state
-      if (window.socket && window.socket.connected) {
-        window.socket.emit("videoQualityChange", {
-          from: videoVariants[prevVariant]?.src || "unknown",
-          to: videoVariants[idx].src,
-          reason: switchedDueToChoppy ? "performance" : "manual",
-          timestamp: new Date().toISOString()
-        });
-      }
-    } catch (e) {
-      console.error("Failed to switch video variant:", e);
-    }
-  }
-
-  // initialize src if multiple variants present (pick initial)
-  if (videoVariants && videoVariants.length > 0 && bgVideo) {
-    bgVideo.src = videoVariants[currentVariant].src;
-  }
-
-  // Monitor playback quality and switch down once if choppy.
-  (function startVideoQualityMonitor(){
-  if (!bgVideo) return;
-  const intervalMs = 3000;
-  const lowFpsThreshold = 20; // adjust to taste
-  let switched = false;
-
-  // Primary: use getVideoPlaybackQuality if available (gives decoded/dropped frames)
-  if (typeof bgVideo.getVideoPlaybackQuality === "function") {
-    let lastTotal = 0;
-    let lastDropped = 0;
-    setInterval(() => {
-      try {
-        const q = bgVideo.getVideoPlaybackQuality();
-        const total = q.totalVideoFrames || 0;
-        const dropped = q.droppedVideoFrames || 0;
-        const totalDelta = total - lastTotal;
-        const droppedDelta = dropped - lastDropped;
-        lastTotal = total; lastDropped = dropped;
-        if (totalDelta > 0) {
-          const fps = totalDelta / (intervalMs/1000);
-          const dropRatio = droppedDelta / Math.max(1, totalDelta);
-          if ((fps < lowFpsThreshold || dropRatio > 0.12) && !switched && currentVariant < videoVariants.length - 1) {
-            switched = true;
-            setVideoVariant(currentVariant + 1);
-          }
-        }
-      } catch (e) { /* ignore */ }
-    }, intervalMs);
-    return;
-  }
-
-  // Secondary: requestVideoFrameCallback — compute FPS from timestamps
-  if (typeof bgVideo.requestVideoFrameCallback === "function") {
-    let frameCount = 0;
-    let firstTs = null;
-    function frameCb(now, meta) {
-      frameCount++;
-      if (!firstTs) firstTs = now;
-      const elapsed = now - firstTs;
-      if (elapsed >= intervalMs) {
-        const fps = frameCount / (elapsed/1000);
-        frameCount = 0; firstTs = null;
-        if (fps < lowFpsThreshold && !switched && currentVariant < videoVariants.length - 1) {
-          switched = true;
-          setVideoVariant(currentVariant + 1);
-        }
-      }
-      try { bgVideo.requestVideoFrameCallback(frameCb); } catch(e){ /* ignore */ }
-    }
-    try { bgVideo.requestVideoFrameCallback(frameCb); } catch(e){}
-    return;
-  }
-
-  // Tertiary: webkitDecodedFrameCount fallback
-  if ('webkitDecodedFrameCount' in bgVideo) {
-    let last = bgVideo.webkitDecodedFrameCount || 0;
-    setInterval(() => {
-      try {
-        const curr = bgVideo.webkitDecodedFrameCount || 0;
-        const delta = curr - last;
-        last = curr;
-        const fps = delta / (intervalMs/1000);
-        if (fps < lowFpsThreshold && !switched && currentVariant < videoVariants.length - 1) {
-          switched = true;
-          setVideoVariant(currentVariant + 1);
-        }
-      } catch(e){}
-    }, intervalMs);
-    return;
-  }
-
-  // Final fallback: rAF heuristic
-  let rafCount = 0;
-  let lastTime = bgVideo.currentTime || 0;
-  function rafLoop() {
-    rafCount++;
-    const nowTime = bgVideo.currentTime || 0;
-    const dt = nowTime - lastTime;
-    if (dt >= 1.0) {
-      const fps = rafCount / dt;
-      rafCount = 0;
-      lastTime = nowTime;
-      if (fps < lowFpsThreshold && !switched && currentVariant < videoVariants.length - 1) {
-        switched = true;
-        setVideoVariant(currentVariant + 1);
-      }
-    }
-    requestAnimationFrame(rafLoop);
-  }
-  requestAnimationFrame(rafLoop);
-  })();
-
-  // Expose a debug function to force variant in console
-  window.__setBackgroundVariant = (i) => { setVideoVariant(i); };
-  }
   if (bgVideo && bgVideo instanceof HTMLVideoElement) {
     const v = document.createElement("video");
-    try { v.src = bgVideo.currentSrc || (bgVideo.querySelector && bgVideo.querySelector('source')?.src) || ""; } catch (e) { v.src = ""; }
+    try { 
+      v.src = bgVideo.currentSrc || videoVariants[currentBgVariant].src || "";
+    } catch (e) { 
+      v.src = videoVariants[currentBgVariant].src || "";
+    }
     v.autoplay = true;
     v.muted = true;
     v.loop = true;
@@ -440,6 +344,53 @@ function createCircleOverlay() {
     v.style.objectFit = "cover";
     circle.appendChild(v);
     v.play().catch(()=>{});
+
+    // Monitor the circle video performance
+    (function startCircleVideoQualityMonitor(){
+      const intervalMs = 3000;
+      const lowFpsThreshold = 20;
+      let switched = false;
+
+      console.log("[CIRCLE VIDEO] Starting quality monitor...");
+
+      if (typeof v.getVideoPlaybackQuality === "function") {
+        console.log("[CIRCLE VIDEO] Using getVideoPlaybackQuality");
+        let lastTotal = 0;
+        let lastDropped = 0;
+        setInterval(() => {
+          try {
+            const q = v.getVideoPlaybackQuality();
+            const total = q.totalVideoFrames || 0;
+            const dropped = q.droppedVideoFrames || 0;
+            const totalDelta = total - lastTotal;
+            const droppedDelta = dropped - lastDropped;
+            lastTotal = total; lastDropped = dropped;
+            
+            if (totalDelta > 0) {
+              const fps = totalDelta / (intervalMs/1000);
+              const dropRatio = droppedDelta / Math.max(1, totalDelta);
+              console.log(`[CIRCLE VIDEO] FPS: ${fps.toFixed(1)}, Drop ratio: ${(dropRatio*100).toFixed(1)}%, Current: ${videoVariants[currentBgVariant].src}`);
+              
+              if ((fps < lowFpsThreshold || dropRatio > 0.12) && !switched && currentBgVariant < videoVariants.length - 1) {
+                console.log(`[CIRCLE VIDEO] Performance issue detected - switching down from variant ${currentBgVariant}`);
+                switched = true;
+                setBgVideoVariant(currentBgVariant + 1, "performance");
+                // Update circle video source too
+                setTimeout(() => {
+                  try {
+                    v.src = videoVariants[currentBgVariant].src;
+                    v.load();
+                    v.play().catch(()=>{});
+                  } catch (e) { console.error("[CIRCLE VIDEO] Failed to update circle video src:", e); }
+                }, 100);
+              }
+            }
+          } catch (e) { 
+            console.error("[CIRCLE VIDEO] Quality monitoring error:", e);
+          }
+        }, intervalMs);
+      }
+    })();
   } else {
     const p = document.createElement("div");
     p.style.color = "#fff";
@@ -723,9 +674,16 @@ document.addEventListener("DOMContentLoaded", () => {
   window.addEventListener("resize", updateCheckboxScale);
   updateCheckboxScale();
 
-  (function setupBgPlayButton(){
+    (function setupBgPlayButton(){
     const bg = document.getElementById("bgVideo");
     if (!bg) return;
+    
+    // Set video source FIRST
+    bg.src = videoVariants[currentBgVariant].src;
+
+    // ensure muted to maximize autoplay chance
+    try { bg.muted = true; } catch (e) { /* ignore */ }
+
     // prefer an existing button in HTML, otherwise create one
     let btn = document.getElementById("bgPlayBtn");
     if (!btn) {
@@ -749,15 +707,11 @@ document.addEventListener("DOMContentLoaded", () => {
       document.body.appendChild(btn);
     }
 
-    // ensure muted to maximize autoplay chance
-    try { bg.muted = true; } catch (e) { /* ignore */ }
-
     const isPlaying = () => !!(bg && !bg.paused && !bg.ended && bg.readyState > 2);
     const update = () => { btn.style.display = isPlaying() ? "none" : "block"; };
 
     const tryPlay = async () => {
       try {
-        // ensure muted just before play attempt
         bg.muted = true;
         await bg.play();
       } catch (err) {
@@ -789,6 +743,58 @@ document.addEventListener("DOMContentLoaded", () => {
         update();
       }
     });
+
+    // START monitoring AFTER video setup and ONLY when video is actually playing
+    bg.addEventListener("playing", () => {
+      // Only start monitoring once when video actually starts playing
+      if (bg.dataset.monitorStarted) return;
+      bg.dataset.monitorStarted = "true";
+      
+      (function startBgVideoQualityMonitor(){
+        const intervalMs = 3000;
+        const lowFpsThreshold = 20;
+
+        console.log("[BG VIDEO] Starting quality monitor...");
+
+        if (typeof bg.getVideoPlaybackQuality === "function") {
+          console.log("[BG VIDEO] Using getVideoPlaybackQuality");
+          let lastTotal = 0;
+          let lastDropped = 0;
+          const monitorInterval = setInterval(() => {
+            // Stop monitoring if video is paused/ended
+            if (bg.paused || bg.ended) return;
+            
+            try {
+              const q = bg.getVideoPlaybackQuality();
+              const total = q.totalVideoFrames || 0;
+              const dropped = q.droppedVideoFrames || 0;
+              const totalDelta = total - lastTotal;
+              const droppedDelta = dropped - lastDropped;
+              lastTotal = total; lastDropped = dropped;
+              
+              if (totalDelta > 0) {
+                const fps = totalDelta / (intervalMs/1000);
+                const dropRatio = droppedDelta / Math.max(1, totalDelta);
+                console.log(`[BG VIDEO] FPS: ${fps.toFixed(1)}, Drop ratio: ${(dropRatio*100).toFixed(1)}%, Current: ${videoVariants[currentBgVariant].src}`);
+                
+                if ((fps < lowFpsThreshold || dropRatio > 0.12) && !switchedDueToChoppy && currentBgVariant < videoVariants.length - 1) {
+                  console.log(`[BG VIDEO] Performance issue detected - switching down from variant ${currentBgVariant}`);
+                  switchedDueToChoppy = true;
+                  setBgVideoVariant(currentBgVariant + 1, "performance");
+                  // Clear the monitor flag so new video can be monitored
+                  bg.dataset.monitorStarted = "";
+                  clearInterval(monitorInterval);
+                }
+              }
+            } catch (e) { 
+              console.error("[BG VIDEO] Quality monitoring error:", e);
+            }
+          }, intervalMs);
+        }
+      })();
+    }, { once: true }); // Only attach this listener once
+
+    window.__setBgVideoVariant = (i) => { setBgVideoVariant(i, "manual"); };
   })();
 
   if (textInput) {
