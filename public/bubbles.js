@@ -95,28 +95,6 @@ try {
   }
 } catch (e) { /* ignore */ }
 
-// ...existing code...
-
-// in updateCircleStyles(), after applying styles add persistence:
-  // apply dimensions and position
-  circle.style.width = `${circleState.sizeVmin}vmin`;
-  circle.style.height = `${circleState.sizeVmin}vmin`;
-  circle.style.left = `${Math.round(circleState.left)}px`;
-  circle.style.top = `${Math.round(circleState.top)}px`;
-  // apply skew transform (keep center)
-  circle.style.transform = `skew(${circleState.skewX}deg, ${circleState.skewY}deg)`;
-
-  // persist circle state
-  try {
-    localStorage.setItem("circleState", JSON.stringify({
-      sizeVmin: circleState.sizeVmin,
-      left: Math.round(circleState.left),
-      top: Math.round(circleState.top),
-      skewX: circleState.skewX,
-      skewY: circleState.skewY
-    }));
-  } catch (e) { /* ignore */ }
-
 // Create a new ship
 function createShip(msg, container = document.body) {
   const div = document.createElement("div");
@@ -486,6 +464,16 @@ function updateCircleStyles(){
   circle.style.transform = `skew(${circleState.skewX}deg, ${circleState.skewY}deg)`;
 
   try {
+    localStorage.setItem("circleState", JSON.stringify({
+      sizeVmin: circleState.sizeVmin,
+      left: Math.round(circleState.left),
+      top: Math.round(circleState.top),
+      skewX: circleState.skewX,
+      skewY: circleState.skewY
+    }));
+  } catch (e) { /* ignore */ }
+
+  try {
     const rect = circle.getBoundingClientRect();
     for (const s of circleShips) {
       if (!s) continue;
@@ -500,6 +488,14 @@ function updateCircleStyles(){
       s.style.top = Math.round(s.y) + "px";
     }
   } catch (e) { /* non-critical */ }
+}
+
+function centerCircle() {
+  const vminPx = Math.min(window.innerWidth, window.innerHeight) / 100;
+  const sizePx = circleState.sizeVmin * vminPx;
+  circleState.left = Math.round((window.innerWidth - sizePx) / 2);
+  circleState.top = Math.round((window.innerHeight - sizePx) / 2);
+  updateCircleStyles();
 }
 
 // ...existing code...
@@ -842,6 +838,11 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
     if(text){
+      if (!socket.connected) {
+        console.error("Socket not connected - cannot send message");
+        alert("Connection lost - please refresh the page");
+        return;
+      }
       const payload = { text };
       if (email) payload.email = email; // only include email if valid
       console.log("client emit newText ->", payload);
