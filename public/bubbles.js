@@ -679,7 +679,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!bg) return;
     
     // Set video source FIRST
-    bg.src = videoVariants[currentBgVariant].src;
+    if (!bg.src) bg.src = videoVariants[currentBgVariant].src;
 
     // ensure muted to maximize autoplay chance
     try { bg.muted = true; } catch (e) { /* ignore */ }
@@ -743,56 +743,43 @@ document.addEventListener("DOMContentLoaded", () => {
         update();
       }
     });
-
-    // START monitoring AFTER video setup and ONLY when video is actually playing
-    bg.addEventListener("playing", () => {
-      // Only start monitoring once when video actually starts playing
-      if (bg.dataset.monitorStarted) return;
-      bg.dataset.monitorStarted = "true";
-      
-      (function startBgVideoQualityMonitor(){
-        const intervalMs = 3000;
-        const lowFpsThreshold = 20;
-
+setTimeout(() => {
+      if (typeof bg.getVideoPlaybackQuality === "function") {
         console.log("[BG VIDEO] Starting quality monitor...");
-
-        if (typeof bg.getVideoPlaybackQuality === "function") {
-          console.log("[BG VIDEO] Using getVideoPlaybackQuality");
-          let lastTotal = 0;
-          let lastDropped = 0;
-          const monitorInterval = setInterval(() => {
-            // Stop monitoring if video is paused/ended
-            if (bg.paused || bg.ended) return;
+        let lastTotal = 0;
+        let lastDropped = 0;
+        let monitorStarted = false;
+        
+        const monitorInterval = setInterval(() => {
+          if (!bg || bg.paused || bg.ended) return;
+          if (!monitorStarted && bg.readyState >= 2) monitorStarted = true;
+          if (!monitorStarted) return;
+          
+          try {
+            const q = bg.getVideoPlaybackQuality();
+            const total = q.totalVideoFrames || 0;
+            const dropped = q.droppedVideoFrames || 0;
+            const totalDelta = total - lastTotal;
+            const droppedDelta = dropped - lastDropped;
+            lastTotal = total; lastDropped = dropped;
             
-            try {
-              const q = bg.getVideoPlaybackQuality();
-              const total = q.totalVideoFrames || 0;
-              const dropped = q.droppedVideoFrames || 0;
-              const totalDelta = total - lastTotal;
-              const droppedDelta = dropped - lastDropped;
-              lastTotal = total; lastDropped = dropped;
+            if (totalDelta > 0) {
+              const fps = totalDelta / 3;
+              const dropRatio = droppedDelta / Math.max(1, totalDelta);
+              console.log(`[BG VIDEO] FPS: ${fps.toFixed(1)}, Drop ratio: ${(dropRatio*100).toFixed(1)}%, Current: ${videoVariants[currentBgVariant].src}`);
               
-              if (totalDelta > 0) {
-                const fps = totalDelta / (intervalMs/1000);
-                const dropRatio = droppedDelta / Math.max(1, totalDelta);
-                console.log(`[BG VIDEO] FPS: ${fps.toFixed(1)}, Drop ratio: ${(dropRatio*100).toFixed(1)}%, Current: ${videoVariants[currentBgVariant].src}`);
-                
-                if ((fps < lowFpsThreshold || dropRatio > 0.12) && !switchedDueToChoppy && currentBgVariant < videoVariants.length - 1) {
-                  console.log(`[BG VIDEO] Performance issue detected - switching down from variant ${currentBgVariant}`);
-                  switchedDueToChoppy = true;
-                  setBgVideoVariant(currentBgVariant + 1, "performance");
-                  // Clear the monitor flag so new video can be monitored
-                  bg.dataset.monitorStarted = "";
-                  clearInterval(monitorInterval);
-                }
+              if ((fps < 20 || dropRatio > 0.12) && !switchedDueToChoppy && currentBgVariant < videoVariants.length - 1) {
+                console.log(`[BG VIDEO] Performance issue detected - switching down`);
+                switchedDueToChoppy = true;
+                setBgVideoVariant(currentBgVariant + 1, "performance");
               }
-            } catch (e) { 
-              console.error("[BG VIDEO] Quality monitoring error:", e);
             }
-          }, intervalMs);
-        }
-      })();
-    }, { once: true }); // Only attach this listener once
+          } catch (e) { 
+            console.error("[BG VIDEO] Quality monitoring error:", e);
+          }
+        }, 3000);
+      }
+    }, 1000);
 
     window.__setBgVideoVariant = (i) => { setBgVideoVariant(i, "manual"); };
   })();
