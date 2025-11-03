@@ -1,5 +1,6 @@
 let adminMode = false;
 let ships = [];
+let circleShips = [];
 let messages = [];
 let circleOverlayEl = null;
 let _savedInputDisplay = null;
@@ -25,7 +26,7 @@ function clearShips() {
 }
 
 // Create a new ship
-function createShip(msg) {
+function createShip(msg, container = document.body) {
   const div = document.createElement("div");
   div.className = "ship";
 
@@ -44,12 +45,17 @@ function createShip(msg) {
     if (confirmDelete) {
       div.remove(); // remove from DOM
       ships = ships.filter(s => s !== div);
+      circleShips = circleShips.filter(s => s !== div);
     }
   });
 
   // Random initial position
-  div.x = Math.random() * (window.innerWidth - 100);
-  div.y = Math.random() * (window.innerHeight - 100);
+  const containerRect = (container === document.body) 
+    ? { width: window.innerWidth, height: window.innerHeight } 
+    : container.getBoundingClientRect();
+  div.x = Math.random() * Math.max(1, containerRect.width - 100);
+  div.y = Math.random() * Math.max(1, containerRect.height - 100);
+  div.style.position = "absolute";
   div.style.left = div.x + "px";
   div.style.top = div.y + "px";
 
@@ -140,8 +146,8 @@ function createShip(msg) {
   // Click handler
   div.onclick = () => showOverlay(msg.text);
 
-  document.body.appendChild(div);
-  ships.push(div);
+  container.appendChild(div);
+  if (container === document.body) ships.push(div); else circleShips.push(div);
   return div;
 }
 
@@ -175,6 +181,8 @@ function createCircleOverlay() {
   overlay.id = "circleOverlay";
   const circle = document.createElement("div");
   circle.className = "circle";
+  circle.style.position = "relative";
+  circle.style.overflow = "hidden";
   overlay.appendChild(circle);
   
 
@@ -215,8 +223,47 @@ function toggleCircleMode(force) {
       _savedInputDisplay = inputBox.style.display || "";
       inputBox.style.display = "none";
     }
+    // hide original ships
+    for (const s of ships) s.style.display = "none";
+    // create clones inside circle
+    for (const m of messages) {
+      createShip(m, circle);
+    }
     el.classList.add("active");
+    if (!window._circleAnimating) {
+      window._circleAnimating = true;
+      (function animateCircleShips(){
+        const rect = circle.getBoundingClientRect();
+        for (let div of circleShips) {
+          if (typeof div.x !== "number") {
+            div.x = Math.random() * Math.max(1, rect.width - 60);
+            div.y = Math.random() * Math.max(1, rect.height - 60);
+          }
+          div.x += div.vx + Math.sin(Date.now()*0.001 + div.x) * 0.2;
+          div.y += div.vy + Math.cos(Date.now()*0.001 + div.y) * 0.2;
+          // Keep inside circle bounds
+          if (div.x < -80) div.x = rect.width;
+          if (div.x > rect.width) div.x = -80;
+          if (div.y < -80) div.y = rect.height;
+          if (div.y > rect.height) div.y = -80;
+
+          div.style.left = div.x + "px";
+          div.style.top = div.y + "px";
+          div.style.transform = `rotate(${div.angle}deg)`;
+          div.angle += div.rotationSpeed;
+        }
+        if (window._circleAnimating) requestAnimationFrame(animateCircleShips);
+      })();
+    }
   } else {
+    // remove circle ships and show originals
+    for (const s of circleShips) {
+      if (s && s.remove) s.remove();
+    }
+    circleShips = [];
+    window._circleAnimating = false;
+
+    for (const s of ships) s.style.display = "";
     if (inputBox) {
       inputBox.style.display = (_savedInputDisplay === "") ? "" : _savedInputDisplay;
       _savedInputDisplay = null;
