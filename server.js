@@ -220,6 +220,27 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     console.log("A user disconnected", ip ? `from IP: ${ip}` : '');
   });
+  socket.on("videoQualityChange", (data) => {
+    try {
+      const ip = socket.data.ip || 'unknown';
+      const from = data?.from || 'unknown';
+      const to = data?.to || 'unknown';
+      const reason = data?.reason || 'unknown';
+      const time = data?.timestamp || new Date().toISOString();
+      
+      const logEntry = `[VIDEO QUALITY] [${time}] IP: ${ip} - switched from ${from} to ${to} (reason: ${reason})\n`;
+      
+      // Log to console
+      console.log(`[VIDEO QUALITY CHANGE] ${ip} switched from ${from} to ${to} (${reason})`);
+      
+      // Log to file
+      fs.appendFile(LOG_FILE, logEntry, (err) => {
+        if (err) console.error("Error writing video quality log:", err);
+      });
+    } catch (e) {
+      console.error("Error handling video quality change:", e);
+    }
+  });
 });
 
 app.post("/api/admin/emails", (req, res) => {

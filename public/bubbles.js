@@ -314,6 +314,14 @@ function createCircleOverlay() {
       // small delay then attempt play (user gesture restrictions apply)
       setTimeout(() => bgVideo.play().catch(()=>{}), 50);
       if (prevPaused) bgVideo.pause(); // respect previous paused state
+      if (window.socket && window.socket.connected) {
+        window.socket.emit("videoQualityChange", {
+          from: videoVariants[prevVariant]?.src || "unknown",
+          to: videoVariants[idx].src,
+          reason: switchedDueToChoppy ? "performance" : "manual",
+          timestamp: new Date().toISOString()
+        });
+      }
     } catch (e) {
       console.error("Failed to switch video variant:", e);
     }
