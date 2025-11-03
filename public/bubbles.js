@@ -4,9 +4,10 @@ let circleShips = [];
 let messages = [];
 let circleOverlayEl = null;
 let _savedInputDisplay = null;
+let zResizeMode = false;
 
 let circleState = {
-  sizeVmin: 85,    // initial circle size in vmin (matches CSS)
+  sizeVmin: 100,    // initial circle size in vmin (matches CSS)
   left: null,      // px from left of viewport
   top: null,       // px from top of viewport
   skewX: 0,        // deg
@@ -209,9 +210,8 @@ function createCircleOverlay() {
   // initialize circleState positions if not set
   const vminPx = Math.min(window.innerWidth, window.innerHeight) / 100;
   const sizePx = circleState.sizeVmin * vminPx;
-  const paddingPx = 12 * vminPx; // match CSS padding:12vmin
-  if (circleState.left === null) circleState.left = paddingPx;
-  if (circleState.top === null) circleState.top = Math.max(8, window.innerHeight - paddingPx - sizePx);
+  if (circleState.left === null) circleState.left = Math.round((window.innerWidth - sizePx) / 2);
+  if (circleState.top === null) circleState.top = Math.round((window.innerHeight - sizePx) / 2);
   // apply initial styles
   if (typeof updateCircleStyles === "function") updateCircleStyles();
   
@@ -349,10 +349,10 @@ function toggleCircleMode(force) {
 // ...existing code...
 
 document.addEventListener("keydown", (e) => {
-  if (e.ctrlKey && (e.key === "q" || e.key === "Q")) {
-    e.preventDefault();
-    toggleCircleMode();
-  }
+  if (e.key && e.key.toLowerCase() === "z") zResizeMode = true;
+});
+document.addEventListener("keyup", (e) => {
+  if (e.key && e.key.toLowerCase() === "z") zResizeMode = false;
 });
 
 document.addEventListener("fullscreenchange", () => {
@@ -381,8 +381,7 @@ document.addEventListener("keydown", (e) => {
   const resizeStepVmin = 2;  // vmin per ctrl+arrow
   const skewStep = 3;        // degrees per shift+arrow
 
-  if (e.ctrlKey) {
-    // Resize: Up/Right -> increase, Down/Left -> decrease
+  if (zResizeMode) {
     const delta = (e.key === "ArrowUp" || e.key === "ArrowRight") ? resizeStepVmin : -resizeStepVmin;
     circleState.sizeVmin = Math.max(10, Math.min(200, circleState.sizeVmin + delta));
     updateCircleStyles();
