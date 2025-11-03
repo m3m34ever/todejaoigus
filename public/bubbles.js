@@ -260,10 +260,26 @@ function updateCircleStyles(){
   circle.style.top = `${Math.round(circleState.top)}px`;
   // apply skew transform (keep center)
   circle.style.transform = `skew(${circleState.skewX}deg, ${circleState.skewY}deg)`;
+
+  try {
+    const rect = circle.getBoundingClientRect();
+    for (const s of circleShips) {
+      if (!s) continue;
+      // clamp by rect, keep a margin equal to element size
+      const elW = s.offsetWidth || 40;
+      const elH = s.offsetHeight || 40;
+      s.x = (typeof s.x === "number") ? s.x : Math.random() * Math.max(1, rect.width - elW);
+      s.y = (typeof s.y === "number") ? s.y : Math.random() * Math.max(1, rect.height - elH);
+      s.x = Math.max(0, Math.min(rect.width - elW, s.x));
+      s.y = Math.max(0, Math.min(rect.height - elH, s.y));
+      s.style.left = Math.round(s.x) + "px";
+      s.style.top = Math.round(s.y) + "px";
+    }
+  } catch (e) { /* non-critical */ }
 }
 
 // ...existing code...
-function toggleCircleMode(force) {
+async function toggleCircleMode(force) {
   const el = createCircleOverlay();
   const circle = el.querySelector(".circle");
   const isActive = el.classList.contains("active");
@@ -271,11 +287,20 @@ function toggleCircleMode(force) {
   const inputBox = document.getElementById("inputBox");
 
   if (shouldActivate) {
+
     // request fullscreen
+    let fsPromise = null;
     if (document.documentElement.requestFullscreen) {
-      document.documentElement.requestFullscreen();
+      fsPromise = document.documentElement.requestFullscreen();
     } else if (document.documentElement.webkitRequestFullscreen) {
       document.documentElement.webkitRequestFullscreen();
+      fsPromise = new Promise(r => setTimeout(r, 120));
+    }
+    try { await fsPromise; } catch (_) { /* ignore if denied */ }
+
+    if (inputBox) {
+      _savedInputDisplay = inputBox.style.display || "";
+      inputBox.style.display = "none";
     }
 
     if (inputBox) {
@@ -285,6 +310,7 @@ function toggleCircleMode(force) {
 
     // mark overlay active and ensure circle gets correct inline sizing/position
     el.classList.add("active");
+    if (typeof centerCircle === "function") centerCircle();
     if (typeof updateCircleStyles === "function") updateCircleStyles();
 
     // hide original ships
@@ -308,7 +334,6 @@ function toggleCircleMode(force) {
           div.x += div.vx + Math.sin(Date.now()*0.001 + div.x) * 0.2;
           div.y += div.vy + Math.cos(Date.now()*0.001 + div.y) * 0.2;
 
-          // Keep inside circle bounds
           if (div.x < -80) div.x = rect.width;
           if (div.x > rect.width) div.x = -80;
           if (div.y < -80) div.y = rect.height;
@@ -324,16 +349,19 @@ function toggleCircleMode(force) {
     }
   } else {
     // exit fullscreen
+    let exitPromise = null;
     if (document.exitFullscreen) {
-      document.exitFullscreen();
+      exitPromise = document.exitFullscreen();
     } else if (document.webkitExitFullscreen) {
       document.webkitExitFullscreen();
+      exitPromise = new Promise(r => setTimeout(r, 120));
+    } else {
+      exitPromise = Promise.resolve();
     }
+    try { await exitPromise; } catch (_) { /* ignore */ }
 
     // remove circle ships and stop animation
-    for (const s of circleShips) {
-      if (s && s.remove) s.remove();
-    }
+    for (const s of circleShips) if (s && s.remove) s.remove();
     circleShips = [];
     window._circleAnimating = false;
 
