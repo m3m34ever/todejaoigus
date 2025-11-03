@@ -444,7 +444,7 @@ function createCircleOverlay() {
   }
   if (bgVideo && bgVideo instanceof HTMLVideoElement) {
     const v = document.createElement("video");
-    try { v.src = bg.currentSrc || (bg.querySelector && bg.querySelector('source')?.src) || ""; } catch (e) { v.src = ""; }
+    try { v.src = bgVideo.currentSrc || (bgVideo.querySelector && bgVideo.querySelector('source')?.src) || ""; } catch (e) { v.src = ""; }
     v.autoplay = true;
     v.muted = true;
     v.loop = true;
