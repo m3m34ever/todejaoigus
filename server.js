@@ -169,9 +169,16 @@ io.on("connection", (socket) => {
 
   // Handle new messages
   socket.on("newText", (data) => {
+    // sanitize input
+    const text = typeof data?.text === "string" ? data.text.trim() : "";
+    const emailRaw = typeof data?.email === "string" ? data.email.trim() : null;
+    const email = (emailRaw && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailRaw)) ? emailRaw : null;
+
+    if (!text) return; // ignore empty messages
+
     const msg = {
-      text: data.text,
-      email: data.email || null,
+      text,
+      email,
       time: new Date().toISOString(),
       ip: socket.data.ip || null
     };
@@ -185,8 +192,8 @@ io.on("connection", (socket) => {
 
     // Log to server console
     const logEntry = `[${msg.time}] ${msg.text}` +
-    (msg.email ? ` | Email: ${msg.email}` : "") +
-    (msg.ip ? ` | IP: ${msg.ip}` : "") + "\n";
+      (msg.email ? ` | Email: ${msg.email}` : "") +
+      (msg.ip ? ` | IP: ${msg.ip}` : "") + "\n";
 
     fs.appendFile(LOG_FILE, logEntry, (err) => {
       if (err) console.error("Error writing to log file:", err);
@@ -197,10 +204,18 @@ io.on("connection", (socket) => {
       fs.appendFile(EMAIL_LOG_FILE, emailLogEntry, (err) => {
         if (err) console.error("Error writing to email log file:", err);
       });
+
+      // moved sendNotificationEmail INSIDE this branch so it only runs when email is valid
+      console.log(`  Feedback email: ${msg.email}`);
+      try { 
+        sendNotificationEmail(msg); 
+      } catch (e) { 
+        console.error("sendNotificationEmail threw:", e && e.message); 
+      }
     }
+
+    // generic log for every message
     console.log(`[NEW MESSAGE] ${msg.text}` + (msg.ip ? ` (from ${msg.ip})` : ''));
-    if (msg.email) console.log(`  Feedback email: ${msg.email}`);
-    try { sendNotificationEmail(msg); } catch (e) { console.error("sendNotificationEmail threw:", e && e.message); }
   });
   socket.on("disconnect", () => {
     console.log("A user disconnected", ip ? `from IP: ${ip}` : '');

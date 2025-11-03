@@ -473,7 +473,9 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
     if(text){
-      socket.emit("newText", { text, email });
+      const payload = { text };
+      if (email) payload.email = email; // only include email if valid
+      socket.emit("newText", payload);
       if (textInput) { textInput.value = ""; textInput.style.height = "auto"; }
       if (checkbox) checkbox.checked = false;
       if (emailInput) { emailInput.value = ""; emailInput.style.display = "none"; }
