@@ -215,6 +215,7 @@ function createCircleOverlay() {
 
 function toggleCircleMode(force) {
   const el = createCircleOverlay();
+  const circle = el.querySelector(".circle");
   const isActive = el.classList.contains("active");
   const shouldActivate = (typeof force === "boolean") ? force : !isActive;
   const inputBox = document.getElementById("inputBox");
@@ -226,6 +227,7 @@ function toggleCircleMode(force) {
     // hide original ships
     for (const s of ships) s.style.display = "none";
     // create clones inside circle
+    const circle = el.querySelector(".circle");
     for (const m of messages) {
       createShip(m, circle);
     }
@@ -233,6 +235,7 @@ function toggleCircleMode(force) {
     if (!window._circleAnimating) {
       window._circleAnimating = true;
       (function animateCircleShips(){
+        const circle = el.querySelector(".circle");
         const rect = circle.getBoundingClientRect();
         for (let div of circleShips) {
           if (typeof div.x !== "number") {
