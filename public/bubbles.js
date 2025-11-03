@@ -214,7 +214,7 @@ function createCircleOverlay() {
   if (circleState.top === null) circleState.top = Math.round((window.innerHeight - sizePx) / 2);
   // apply initial styles
   if (typeof updateCircleStyles === "function") updateCircleStyles();
-  
+
   overlay.appendChild(circle);
 
   const bg = document.getElementById("bgVideo");
@@ -347,6 +347,16 @@ function toggleCircleMode(force) {
   }
 }
 // ...existing code...
+
+document.addEventListener('keydown', (e) => {
+  // Accept Ctrl+Q on Windows/Linux, Cmd+Q on macOS (avoid OS quit on mac if possible)
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'q' || e.key === 'Q')) {
+    e.preventDefault();
+    toggleCircleMode();
+    // Some browsers change viewport after fullscreen; reapply sizes shortly after
+    setTimeout(() => { if (typeof updateCircleStyles === 'function') updateCircleStyles(); }, 60);
+  }
+});
 
 document.addEventListener("keydown", (e) => {
   if (e.key && e.key.toLowerCase() === "z") zResizeMode = true;
