@@ -75,6 +75,43 @@ body {
   font-size:2em;
 }
 
+/* Fullscreen circular overlay (no hint, no click-to-close) */
+#circleOverlay {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.85);
+  z-index: 12000;
+  pointer-events: auto;
+}
+#circleOverlay.active { display: flex; }
+
+.circle {
+  width: min(92vmin, 920px);
+  height: min(92vmin, 920px);
+  border-radius: 50%;
+  overflow: hidden;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 0 6px rgba(255,255,255,0.03) inset;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ensure media covers the circular area */
+.circle video,
+.circle img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Hide overlay controls/hints entirely */
+.circle-close-hint { display: none; }
+
 /* Input box */
 #inputBox {
   position:fixed;

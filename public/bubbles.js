@@ -1,6 +1,8 @@
 let adminMode = false;
 let ships = [];
 let messages = [];
+let circleOverlayEl = null;
+let _savedInputDisplay = null;
 
 try {
   const saved = localStorage.getItem("messages");
@@ -166,6 +168,69 @@ function showOverlay(text){
   overlay.style.display = "flex";
   overlay.onclick = ()=> overlay.style.display="none";
 }
+
+function createCircleOverlay() {
+  if (circleOverlayEl) return circleOverlayEl;
+  const overlay = document.createElement("div");
+  overlay.id = "circleOverlay";
+  const circle = document.createElement("div");
+  circle.className = "circle";
+  overlay.appendChild(circle);
+  
+
+  const bg = document.getElementById("bgVideo");
+  if (bg && bg instanceof HTMLVideoElement) {
+    const v = document.createElement("video");
+    try { v.src = bg.currentSrc || (bg.querySelector && bg.querySelector('source')?.src) || ""; } catch (e) { v.src = ""; }
+    v.autoplay = true;
+    v.muted = true;
+    v.loop = true;
+    v.playsInline = true;
+    v.style.width = "100%";
+    v.style.height = "100%";
+    v.style.objectFit = "cover";
+    circle.appendChild(v);
+    v.play().catch(()=>{});
+  } else {
+    const p = document.createElement("div");
+    p.style.color = "#fff";
+    p.style.padding = "24px";
+    p.innerText = "Preview unavailable";
+    circle.appendChild(p);
+  }
+
+  overlay.addEventListener("click", (e) => e.stopPropagation());
+  document.body.appendChild(overlay);
+  circleOverlayEl = overlay;
+  return overlay;
+}
+
+function toggleCircleMode(force) {
+  const el = createCircleOverlay();
+  const isActive = el.classList.contains("active");
+  const shouldActivate = (typeof force === "boolean") ? force : !isActive;
+  const inputBox = document.getElementById("inputBox");
+  if (shouldActivate) {
+    if (inputBox) {
+      _savedInputDisplay = inputBox.style.display || "";
+      inputBox.style.display = "none";
+    }
+    el.classList.add("active");
+  } else {
+    if (inputBox) {
+      inputBox.style.display = (_savedInputDisplay === "") ? "" : _savedInputDisplay;
+      _savedInputDisplay = null;
+    }
+    el.classList.remove("active");
+  }
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.ctrlKey && (e.key === "q" || e.key === "Q")) {
+    e.preventDefault();
+    toggleCircleMode();
+  }
+});
 
 // Animate floating ships
 function animateShips(){
