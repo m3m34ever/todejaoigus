@@ -929,6 +929,25 @@ document.addEventListener("DOMContentLoaded", () => {
     console.log("All ships cleared by admin");
   });
 
+  socket.on("restoreAll", (msgs) => {
+    // Server broadcasted restore - rebuild ships from restored messages
+    clearShips();
+    for (const s of circleShips) if (s && s.remove) s.remove();
+    circleShips = [];
+    messages = [];
+    
+    msgs.forEach(m => {
+      messages.push(m);
+      createShip(m);
+    });
+    
+    try {
+      localStorage.setItem("messages", JSON.stringify(messages));
+    } catch (e) { /* ignore */ }
+    
+    console.log(`All ships restored by admin (${msgs.length} messages)`);
+  });
+
 
   // Toggle admin mode with Shift + A
   document.addEventListener("keydown", async (e) => {
@@ -973,6 +992,52 @@ function createAdminControls() {
   container.style.alignItems = "flex-end";
   document.body.appendChild(container);
 
+  const undoBtn = document.createElement("button");
+  undoBtn.id = "admin-undo-button";
+  undoBtn.innerText = "Undo Clear All";
+  undoBtn.style.background = "#228822";
+  undoBtn.style.color = "#fff";
+  undoBtn.style.border = "1px solid #116611";
+  undoBtn.style.padding = "6px 10px";
+  undoBtn.style.borderRadius = "4px";
+  undoBtn.style.cursor = "pointer";
+  undoBtn.style.fontSize = "12px";
+  undoBtn.style.display = "none"; // hidden initially
+  undoBtn.onclick = async () => {
+    const confirmed = confirm("Restore all previously cleared ships?");
+    if (!confirmed) return;
+
+    try {
+      undoBtn.innerText = "Restoring...";
+      undoBtn.disabled = true;
+      
+      const res = await fetch("/api/admin/undo-clear", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: window._adminPassword }),
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        alert(`Successfully restored ${data.restored} ships!`);
+        undoBtn.style.display = "none"; // hide after successful undo
+      } else if (res.status === 400) {
+        alert("No backup available to restore from.");
+        undoBtn.style.display = "none";
+      } else if (res.status === 401) {
+        alert("Unauthorized. Please re-authenticate as admin.");
+      } else {
+        alert(`Failed to restore ships: ${res.status}`);
+      }
+    } catch (err) {
+      alert("Error restoring ships: " + err.message);
+    } finally {
+      undoBtn.innerText = "Undo Clear All";
+      undoBtn.disabled = false;
+    }
+  };
+  container.appendChild(undoBtn);
+
   // clear all button
   const clearBtn = document.createElement("button");
   clearBtn.id = "admin-clear-all-button";
@@ -990,8 +1055,8 @@ function createAdminControls() {
       `This will:\n` +
       `• Remove all ${ships.length} visible ships from the screen\n` +
       `• Clear all ${messages.length} stored messages from server\n` +
-      `• This action CANNOT be undone\n\n` +
-      `Type "DELETE ALL" to confirm:`
+      `• You can UNDO this action until the server restarts\n\n` +
+      `Continue?`
     );
     
     if (!confirmed) return;
@@ -1006,7 +1071,6 @@ function createAdminControls() {
       clearBtn.innerText = "Clearing...";
       clearBtn.disabled = true;
       
-      // Send clear request to server
       const res = await fetch("/api/admin/clear-all", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1014,18 +1078,22 @@ function createAdminControls() {
       });
       
       if (res.ok) {
-        // Clear local state immediately
+        const data = await res.json();
         clearShips();
         for (const s of circleShips) if (s && s.remove) s.remove();
         circleShips = [];
         messages = [];
         
-        // Clear localStorage
         try {
           localStorage.removeItem("messages");
         } catch (e) { /* ignore */ }
         
-        alert("All ships cleared successfully!");
+        // Show undo button if backup was created
+        if (data.backupAvailable) {
+          undoBtn.style.display = "block";
+        }
+        
+        alert("All ships cleared successfully! You can undo this action if needed.");
       } else if (res.status === 401) {
         alert("Unauthorized. Please re-authenticate as admin.");
       } else {

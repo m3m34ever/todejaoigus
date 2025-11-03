@@ -128,6 +128,7 @@ ensureParentDir(STATE_FILE);
 
 // Store messages in memory
 let messages = [];
+let lastBackup = null;
 
 try {
   if (fs.existsSync(STATE_FILE)) {
@@ -241,19 +242,7 @@ io.on("connection", (socket) => {
       console.error("Error handling video quality change:", e);
     }
   });
-  socket.on("clearAll", () => {
-    // Server broadcasted clear all - update local state
-    clearShips();
-    for (const s of circleShips) if (s && s.remove) s.remove();
-    circleShips = [];
-    messages = [];
-    
-    try {
-      localStorage.removeItem("messages");
-    } catch (e) { /* ignore */ }
-    
-    console.log("All ships cleared by admin");
-  });
+  
 });
 
 app.post("/api/admin/clear-all", (req, res) => {
@@ -267,8 +256,15 @@ app.post("/api/admin/clear-all", (req, res) => {
       return res.status(401).json({ ok: false, error: "unauthorized" });
     }
 
+    // CREATE BACKUP before clearing
+    lastBackup = {
+      messages: [...messages], // deep copy
+      timestamp: time,
+      clearedBy: ip || 'unknown'
+    };
+
     // Log the clear operation
-    const logEntry = `[ADMIN CLEAR] [${time}] IP: ${ip || 'unknown'} - cleared all ${messages.length} messages\n`;
+    const logEntry = `[ADMIN CLEAR] [${time}] IP: ${ip || 'unknown'} - cleared all ${messages.length} messages (backup created)\n`;
     fs.appendFile(LOG_FILE, logEntry, (e)=>{ if(e) console.error(e); });
 
     // Clear messages from memory
@@ -281,11 +277,50 @@ app.post("/api/admin/clear-all", (req, res) => {
     // Broadcast clear to all connected clients
     io.emit("clearAll");
     
-    console.log(`[ADMIN] Cleared ${clearedCount} messages from ${ip || 'unknown'}`);
-    res.json({ ok: true, cleared: clearedCount });
+    console.log(`[ADMIN] Cleared ${clearedCount} messages from ${ip || 'unknown'} (backup available)`);
+    res.json({ ok: true, cleared: clearedCount, backupAvailable: true });
     
   } catch (err) {
     console.error("Error in admin clear-all:", err);
+    res.status(500).json({ ok: false, error: "internal_error" });
+  }
+});
+
+app.post("/api/admin/undo-clear", (req, res) => {
+  try {
+    const ip = getIpFromReq(req);
+    const supplied = req.body?.password;
+    const time = new Date().toISOString();
+
+    if (!supplied || supplied !== ADMIN_PASSWORD) {
+      fs.appendFile(LOG_FILE, `[ADMIN UNDO] [${time}] IP: ${ip || 'unknown'} - unauthorized attempt\n`, (e)=>{ if(e) console.error(e); });
+      return res.status(401).json({ ok: false, error: "unauthorized" });
+    }
+
+    if (!lastBackup || !lastBackup.messages) {
+      return res.status(400).json({ ok: false, error: "no_backup_available" });
+    }
+
+    // Restore from backup
+    messages = [...lastBackup.messages];
+    saveState();
+
+    // Log the restore operation
+    const logEntry = `[ADMIN UNDO] [${time}] IP: ${ip || 'unknown'} - restored ${messages.length} messages from backup (${lastBackup.timestamp})\n`;
+    fs.appendFile(LOG_FILE, logEntry, (e)=>{ if(e) console.error(e); });
+
+    // Broadcast restore to all connected clients
+    io.emit("restoreAll", messages.map(m => ({ text: m.text, time: m.time, hasEmail: !!m.email })));
+    
+    console.log(`[ADMIN] Restored ${messages.length} messages from backup by ${ip || 'unknown'}`);
+    
+    // Clear the backup after successful restore
+    lastBackup = null;
+    
+    res.json({ ok: true, restored: messages.length });
+    
+  } catch (err) {
+    console.error("Error in admin undo-clear:", err);
     res.status(500).json({ ok: false, error: "internal_error" });
   }
 });
