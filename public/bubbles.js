@@ -344,7 +344,7 @@ function createCircleOverlay() {
     // debugging helper
     window.__setBackgroundVariant = (i) => { setBgVariant(i); };
   }
-  if (bg && bg instanceof HTMLVideoElement) {
+  if (bgVideo && bgVideo instanceof HTMLVideoElement) {
     const v = document.createElement("video");
     try { v.src = bg.currentSrc || (bg.querySelector && bg.querySelector('source')?.src) || ""; } catch (e) { v.src = ""; }
     v.autoplay = true;
@@ -423,11 +423,6 @@ async function toggleCircleMode(force) {
       fsPromise = new Promise(r => setTimeout(r, 120));
     }
     try { await fsPromise; } catch (_) { /* ignore if denied */ }
-
-    if (inputBox) {
-      _savedInputDisplay = inputBox.style.display || "";
-      inputBox.style.display = "none";
-    }
 
     if (inputBox) {
       _savedInputDisplay = inputBox.style.display || "";
