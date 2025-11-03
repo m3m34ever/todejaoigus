@@ -246,7 +246,7 @@ function toggleCircleMode(force) {
       createShip(m, circle);
     }
     el.classList.add("active");
-    
+
     if (!window._circleAnimating) {
       window._circleAnimating = true;
       (function animateCircleShips(){
@@ -464,12 +464,12 @@ document.addEventListener("DOMContentLoaded", () => {
     let email = null;
     if (wantsFeedback && emailInput) {
       const v = emailInput.value.trim();
-      if (v) {
+      const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+      if (v && emailPattern.test(v)) {
         email = v;
       } else {
-        // no email provided — treat as no feedback requested
-        if (checkbox) checkbox.checked = false;
-        if (emailInput) { emailInput.value = ""; emailInput.style.display = "none"; }
+        email = null;
       }
     }
     if(text){
