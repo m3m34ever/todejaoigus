@@ -217,7 +217,133 @@ function createCircleOverlay() {
 
   overlay.appendChild(circle);
 
-  const bg = document.getElementById("bgVideo");
+  const bgVideo = document.getElementById("bgVideo");
+  if (bgVideo) {
+    const videoVariants = [
+      { src: "background.mp4", width: 1920 },      // high quality (index 0)
+      { src: "background-720.mp4", width: 1280 }   // fallback (index 1)
+    ];
+
+    // choose initial variant (prefer high, but pick 720 for slow connections / weak devices)
+    function chooseInitialVariantIndex() {
+      try {
+        const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+        const eff = conn && conn.effectiveType ? conn.effectiveType : null;
+        const deviceMem = navigator.deviceMemory || 4;
+        if (eff && (eff.includes("2g") || eff.includes("3g") || eff === "slow-2g")) return 1;
+        if (deviceMem <= 1) return 1;
+        return 0;
+      } catch (e) { return 0; }
+    }
+
+    let currentVariant = chooseInitialVariantIndex();
+    let switchedToLower = false;
+
+    async function setBgVariant(idx) {
+      idx = Math.max(0, Math.min(videoVariants.length - 1, idx));
+      if (currentVariant === idx) return;
+      currentVariant = idx;
+      const wasPaused = bgVideo.paused;
+      try {
+        bgVideo.pause();
+        bgVideo.src = videoVariants[idx].src;
+        bgVideo.load();
+        // try to keep autoplay/playing if it was playing
+        if (!wasPaused) await bgVideo.play().catch(()=>{});
+      } catch (e) { /* ignore */ }
+    }
+
+    // init src
+    bgVideo.src = videoVariants[currentVariant].src;
+
+    // monitor playback quality and switch down only once if choppy
+    (function startMonitor() {
+      const intervalMs = 3000;
+      const lowFpsThreshold = 20;
+      // modern: requestVideoFrameCallback
+      if (typeof bgVideo.requestVideoFrameCallback === "function") {
+        let frameCount = 0, firstTs = null;
+        function frameCb(now) {
+          frameCount++;
+          if (!firstTs) firstTs = now;
+          const elapsed = now - firstTs;
+          if (elapsed >= intervalMs) {
+            const fps = (frameCount / (elapsed/1000));
+            frameCount = 0; firstTs = null;
+            if (fps < lowFpsThreshold && !switchedToLower && currentVariant < videoVariants.length - 1) {
+              switchedToLower = true;
+              setBgVariant(currentVariant + 1);
+            }
+          }
+          try { bgVideo.requestVideoFrameCallback(frameCb); } catch(e){/*ignore*/}
+        }
+        try { bgVideo.requestVideoFrameCallback(frameCb); } catch(e){/*ignore*/}
+        return;
+      }
+
+      // fallback: getVideoPlaybackQuality
+      if (typeof bgVideo.getVideoPlaybackQuality === "function") {
+        let lastTotal = 0;
+        setInterval(() => {
+          try {
+            const q = bgVideo.getVideoPlaybackQuality();
+            const total = q.totalVideoFrames || 0;
+            const totalDelta = total - lastTotal;
+            lastTotal = total;
+            if (totalDelta > 0) {
+              const fps = (totalDelta / (intervalMs/1000));
+              if (fps < lowFpsThreshold && !switchedToLower && currentVariant < videoVariants.length - 1) {
+                switchedToLower = true;
+                setBgVariant(currentVariant + 1);
+              }
+            }
+          } catch (e) {}
+        }, intervalMs);
+        return;
+      }
+
+      // older fallback: webkitDecodedFrameCount
+      if ('webkitDecodedFrameCount' in bgVideo) {
+        let lastDecoded = bgVideo.webkitDecodedFrameCount || 0;
+        setInterval(() => {
+          try {
+            const decoded = bgVideo.webkitDecodedFrameCount || 0;
+            const delta = decoded - lastDecoded;
+            lastDecoded = decoded;
+            const fps = delta / (intervalMs/1000);
+            if (fps < lowFpsThreshold && !switchedToLower && currentVariant < videoVariants.length - 1) {
+              switchedToLower = true;
+              setBgVariant(currentVariant + 1);
+            }
+          } catch(e){}
+        }, intervalMs);
+        return;
+      }
+
+      // last fallback: simple rAF heuristic
+      let rafCount = 0;
+      let lastTime = bgVideo.currentTime || 0;
+      function rafLoop() {
+        rafCount++;
+        const nowTime = bgVideo.currentTime || 0;
+        const dt = nowTime - lastTime;
+        if (dt >= 1.0) {
+          const fps = rafCount / dt;
+          rafCount = 0;
+          lastTime = nowTime;
+          if (fps < lowFpsThreshold && !switchedToLower && currentVariant < videoVariants.length - 1) {
+            switchedToLower = true;
+            setBgVariant(currentVariant + 1);
+          }
+        }
+        requestAnimationFrame(rafLoop);
+      }
+      requestAnimationFrame(rafLoop);
+    })();
+
+    // debugging helper
+    window.__setBackgroundVariant = (i) => { setBgVariant(i); };
+  }
   if (bg && bg instanceof HTMLVideoElement) {
     const v = document.createElement("video");
     try { v.src = bg.currentSrc || (bg.querySelector && bg.querySelector('source')?.src) || ""; } catch (e) { v.src = ""; }
