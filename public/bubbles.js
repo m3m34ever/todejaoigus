@@ -742,6 +742,32 @@ document.addEventListener("DOMContentLoaded", () => {
         update();
       }
     });
+    (function enableSeamlessLooping() {
+  const bg = document.getElementById("bgVideo");
+  if (!bg) return;
+
+  // Force seamless looping for Chrome/Safari
+  bg.addEventListener("timeupdate", () => {
+    // Loop seamlessly by resetting to start slightly before the end
+    if (bg.duration > 0 && bg.currentTime >= bg.duration - 0.1) {
+      bg.currentTime = 0;
+    }
+  });
+
+  // Additional event listeners to handle loop edge cases
+  bg.addEventListener("ended", () => {
+    bg.currentTime = 0;
+    bg.play().catch(() => {});
+  });
+
+  // Ensure smooth playback on Chrome/Safari
+  bg.addEventListener("loadeddata", () => {
+    // Set playback rate to ensure smooth looping
+    try {
+      bg.playbackRate = 1.0;
+    } catch (e) {}
+  });
+})();
     setTimeout(() => {
       if (typeof bg.getVideoPlaybackQuality === "function") {
         console.log("[BG VIDEO] Will start quality monitor in 10 seconds...");
