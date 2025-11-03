@@ -742,8 +742,6 @@ document.addEventListener("DOMContentLoaded", () => {
         update();
       }
     });
-    (function enableSeamlessLooping() {
-  const bg = document.getElementById("bgVideo");
   if (!bg) return;
 
   // Force seamless looping for Chrome/Safari
@@ -767,7 +765,7 @@ document.addEventListener("DOMContentLoaded", () => {
       bg.playbackRate = 1.0;
     } catch (e) {}
   });
-})();
+
     setTimeout(() => {
       if (typeof bg.getVideoPlaybackQuality === "function") {
         console.log("[BG VIDEO] Will start quality monitor in 10 seconds...");
