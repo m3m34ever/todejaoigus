@@ -965,6 +965,7 @@ document.addEventListener("DOMContentLoaded", () => {
           window._adminPassword = input;
           document.body.classList.add("admin-mode");
           createAdminControls();
+          checkBackupStatus();
           alert("Admin mode activated. You can now right-click ships to delete them.");
         } else {
           alert("Incorrect password.");
@@ -975,6 +976,66 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 });
+
+async function checkBackupStatus() {
+  if (!window._adminPassword) return;
+  try {
+    const res = await fetch("/api/admin/backup-status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: window._adminPassword }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const undoBtn = document.getElementById("admin-undo-button");
+      if (undoBtn && data.hasBackup) {
+        undoBtn.style.display = "block";
+        // Optionally show backup info in button text
+        const count = data.backupInfo?.messageCount || 0;
+        undoBtn.innerText = `Undo Clear All (${count} ships)`;
+      }
+    }
+  } catch (err) {
+    console.error("Error checking backup status:", err);
+  }
+}
+
+// MODIFY the undo button click handler to refresh status after restore:
+undoBtn.onclick = async () => {
+  const confirmed = confirm("Restore all previously cleared ships?");
+  if (!confirmed) return;
+
+  try {
+    undoBtn.innerText = "Restoring...";
+    undoBtn.disabled = true;
+    
+    const res = await fetch("/api/admin/undo-clear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: window._adminPassword }),
+    });
+    
+    if (res.ok) {
+      const data = await res.json();
+      alert(`Successfully restored ${data.restored} ships!`);
+      undoBtn.style.display = "none"; // hide after successful undo
+    } else if (res.status === 400) {
+      alert("No backup available to restore from.");
+      undoBtn.style.display = "none";
+    } else if (res.status === 401) {
+      alert("Unauthorized. Please re-authenticate as admin.");
+    } else {
+      alert(`Failed to restore ships: ${res.status}`);
+    }
+  } catch (err) {
+    alert("Error restoring ships: " + err.message);
+  } finally {
+    undoBtn.innerText = "Undo Clear All";
+    undoBtn.disabled = false;
+    // Refresh backup status in case of errors
+    setTimeout(() => checkBackupStatus(), 500);
+  }
+};
 
 function createAdminControls() {
   // avoid duplicates

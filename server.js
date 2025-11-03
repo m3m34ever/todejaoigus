@@ -89,6 +89,9 @@ function getIpFromReq(req) {
 let LOG_FILE = process.env.LOG_FILE || './logs/messages.log';
 let EMAIL_LOG_FILE = process.env.EMAIL_LOG_FILE || './logs/email_messages.log';
 let STATE_FILE = process.env.STATE_FILE || './data/state.json';
+let BACKUP_FILE = process.env.BACKUP_FILE || './data/backup.json';
+BACKUP_FILE = prepareFile(BACKUP_FILE);
+ensureParentDir(BACKUP_FILE);
 
 function prepareFile(filePath) {
   const dir = path.dirname(filePath);
@@ -128,7 +131,39 @@ ensureParentDir(STATE_FILE);
 
 // Store messages in memory
 let messages = [];
-let lastBackup = null;
+
+function loadBackup() {
+  try {
+    if (fs.existsSync(BACKUP_FILE)) {
+      const raw = fs.readFileSync(BACKUP_FILE, "utf-8");
+      return raw ? JSON.parse(raw) : null;
+    }
+    return null;
+  } catch (err) {
+    console.error("Error loading backup file:", err);
+    return null;
+  }
+}
+
+function saveBackup(backupData) {
+  try {
+    const tmp = BACKUP_FILE + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(backupData), "utf8");
+    fs.renameSync(tmp, BACKUP_FILE);
+  } catch (err) {
+    console.error("Failed to save backup file:", err);
+  }
+}
+
+function clearBackup() {
+  try {
+    if (fs.existsSync(BACKUP_FILE)) {
+      fs.unlinkSync(BACKUP_FILE);
+    }
+  } catch (err) {
+    console.error("Failed to clear backup file:", err);
+  }
+}
 
 try {
   if (fs.existsSync(STATE_FILE)) {
@@ -256,15 +291,16 @@ app.post("/api/admin/clear-all", (req, res) => {
       return res.status(401).json({ ok: false, error: "unauthorized" });
     }
 
-    // CREATE BACKUP before clearing
-    lastBackup = {
+    // CREATE BACKUP and save to disk
+    const backupData = {
       messages: [...messages], // deep copy
       timestamp: time,
       clearedBy: ip || 'unknown'
     };
+    saveBackup(backupData);
 
     // Log the clear operation
-    const logEntry = `[ADMIN CLEAR] [${time}] IP: ${ip || 'unknown'} - cleared all ${messages.length} messages (backup created)\n`;
+    const logEntry = `[ADMIN CLEAR] [${time}] IP: ${ip || 'unknown'} - cleared all ${messages.length} messages (backup saved to disk)\n`;
     fs.appendFile(LOG_FILE, logEntry, (e)=>{ if(e) console.error(e); });
 
     // Clear messages from memory
@@ -277,7 +313,7 @@ app.post("/api/admin/clear-all", (req, res) => {
     // Broadcast clear to all connected clients
     io.emit("clearAll");
     
-    console.log(`[ADMIN] Cleared ${clearedCount} messages from ${ip || 'unknown'} (backup available)`);
+    console.log(`[ADMIN] Cleared ${clearedCount} messages from ${ip || 'unknown'} (backup saved to disk)`);
     res.json({ ok: true, cleared: clearedCount, backupAvailable: true });
     
   } catch (err) {
@@ -297,16 +333,18 @@ app.post("/api/admin/undo-clear", (req, res) => {
       return res.status(401).json({ ok: false, error: "unauthorized" });
     }
 
-    if (!lastBackup || !lastBackup.messages) {
+    // Load backup from disk
+    const backupData = loadBackup();
+    if (!backupData || !backupData.messages) {
       return res.status(400).json({ ok: false, error: "no_backup_available" });
     }
 
     // Restore from backup
-    messages = [...lastBackup.messages];
+    messages = [...backupData.messages];
     saveState();
 
     // Log the restore operation
-    const logEntry = `[ADMIN UNDO] [${time}] IP: ${ip || 'unknown'} - restored ${messages.length} messages from backup (${lastBackup.timestamp})\n`;
+    const logEntry = `[ADMIN UNDO] [${time}] IP: ${ip || 'unknown'} - restored ${messages.length} messages from backup (${backupData.timestamp})\n`;
     fs.appendFile(LOG_FILE, logEntry, (e)=>{ if(e) console.error(e); });
 
     // Broadcast restore to all connected clients
@@ -314,13 +352,38 @@ app.post("/api/admin/undo-clear", (req, res) => {
     
     console.log(`[ADMIN] Restored ${messages.length} messages from backup by ${ip || 'unknown'}`);
     
-    // Clear the backup after successful restore
-    lastBackup = null;
+    // Clear the backup file after successful restore
+    clearBackup();
     
     res.json({ ok: true, restored: messages.length });
     
   } catch (err) {
     console.error("Error in admin undo-clear:", err);
+    res.status(500).json({ ok: false, error: "internal_error" });
+  }
+});
+
+app.post("/api/admin/backup-status", (req, res) => {
+  try {
+    const supplied = req.body?.password;
+    if (!supplied || supplied !== ADMIN_PASSWORD) {
+      return res.status(401).json({ ok: false, error: "unauthorized" });
+    }
+
+    const backupData = loadBackup();
+    const hasBackup = !!(backupData && backupData.messages);
+    
+    res.json({ 
+      ok: true, 
+      hasBackup,
+      backupInfo: hasBackup ? {
+        messageCount: backupData.messages.length,
+        timestamp: backupData.timestamp,
+        clearedBy: backupData.clearedBy
+      } : null
+    });
+  } catch (err) {
+    console.error("Error checking backup status:", err);
     res.status(500).json({ ok: false, error: "internal_error" });
   }
 });
