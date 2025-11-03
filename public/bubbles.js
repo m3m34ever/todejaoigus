@@ -56,8 +56,17 @@ function createShip(msg, container = document.body) {
   div.x = Math.random() * Math.max(1, containerRect.width - 100);
   div.y = Math.random() * Math.max(1, containerRect.height - 100);
   div.style.position = "absolute";
-  div.style.left = div.x + "px";
-  div.style.top = div.y + "px";
+  if (container === document.body) {
+    div.style.left = div.x + "px";
+    div.style.top = div.y + "px";
+  } else {
+  // For circle container, ensure container is positioned
+    if (getComputedStyle(container).position === "static") {
+      container.style.position = "relative";
+    }
+    div.style.left = div.x + "px";
+    div.style.top = div.y + "px";
+  }
 
   // Random initial direction and speed
   const angle = Math.random() * 2 * Math.PI;
@@ -128,8 +137,9 @@ function createShip(msg, container = document.body) {
   addLine(-s*0.4,0, 0,s*0.5);
   addLine(s*0.4,0, 0,s*0.5);
 
+  div.style.width = s + "px";
+  div.style.height = s + "px";
   div.appendChild(svg);
-
   // Text preview under the ship
   const preview = document.createElement("div");
   preview.className = "ship-preview";
@@ -183,6 +193,7 @@ function createCircleOverlay() {
   circle.className = "circle";
   circle.style.position = "relative";
   circle.style.overflow = "hidden";
+  circle.style.zIndex = "2"; 
   overlay.appendChild(circle);
   
 
@@ -220,22 +231,25 @@ function toggleCircleMode(force) {
   const shouldActivate = (typeof force === "boolean") ? force : !isActive;
   const inputBox = document.getElementById("inputBox");
   if (shouldActivate) {
+    if (document.documentElement.requestFullscreen) {
+      document.documentElement.requestFullscreen();
+    } else if (document.documentElement.webkitRequestFullscreen) {
+      document.documentElement.webkitRequestFullscreen();
+    }
     if (inputBox) {
       _savedInputDisplay = inputBox.style.display || "";
       inputBox.style.display = "none";
     }
     // hide original ships
     for (const s of ships) s.style.display = "none";
-    // create clones inside circle
-    const circle = el.querySelector(".circle");
     for (const m of messages) {
       createShip(m, circle);
     }
     el.classList.add("active");
+    
     if (!window._circleAnimating) {
       window._circleAnimating = true;
       (function animateCircleShips(){
-        const circle = el.querySelector(".circle");
         const rect = circle.getBoundingClientRect();
         for (let div of circleShips) {
           if (typeof div.x !== "number") {
@@ -259,6 +273,11 @@ function toggleCircleMode(force) {
       })();
     }
   } else {
+    if (document.exitFullscreen) {
+      document.exitFullscreen();
+    } else if (document.webkitExitFullscreen) {
+      document.webkitExitFullscreen();
+    }
     // remove circle ships and show originals
     for (const s of circleShips) {
       if (s && s.remove) s.remove();
@@ -279,6 +298,16 @@ document.addEventListener("keydown", (e) => {
   if (e.ctrlKey && (e.key === "q" || e.key === "Q")) {
     e.preventDefault();
     toggleCircleMode();
+  }
+});
+
+document.addEventListener("fullscreenchange", () => {
+  const isFullscreen = document.fullscreenElement !== null;
+  const circleActive = circleOverlayEl && circleOverlayEl.classList.contains("active");
+  
+  // If fullscreen was exited but circle mode is still active, deactivate circle mode
+  if (!isFullscreen && circleActive) {
+    toggleCircleMode(false);
   }
 });
 
