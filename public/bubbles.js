@@ -699,6 +699,10 @@ function animateShips(){
 
 document.addEventListener("DOMContentLoaded", () => {
   const socket = io();
+  window.socket = socket;
+  socket.on("connect", () => console.log("socket connected", socket.id));
+  socket.on("connect_error", (err) => console.error("socket connect_error", err));
+  socket.on("disconnect", (reason) => console.log("socket disconnected", reason));
   const textInput = document.getElementById("textInput");
   const checkbox = document.getElementById("feedbackCheckbox");
   const emailInput = document.getElementById("emailInput");
@@ -840,6 +844,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if(text){
       const payload = { text };
       if (email) payload.email = email; // only include email if valid
+      console.log("client emit newText ->", payload);
       socket.emit("newText", payload);
       if (textInput) { textInput.value = ""; textInput.style.height = "auto"; }
       if (checkbox) checkbox.checked = false;
