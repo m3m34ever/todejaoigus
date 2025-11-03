@@ -457,7 +457,6 @@ function centerCircle() {
   updateCircleStyles();
 }
 
-// ...existing code...
 async function toggleCircleMode(force) {
   const el = createCircleOverlay();
   const circle = el.querySelector(".circle");
@@ -916,6 +915,20 @@ document.addEventListener("DOMContentLoaded", () => {
     const created = createShip(msg);
     if (created && created.dataset) created.dataset.text = msg.text;
   });
+  socket.on("clearAll", () => {
+    // Server broadcasted clear all - update local state
+    clearShips();
+    for (const s of circleShips) if (s && s.remove) s.remove();
+    circleShips = [];
+    messages = [];
+    
+    try {
+      localStorage.removeItem("messages");
+    } catch (e) { /* ignore */ }
+    
+    console.log("All ships cleared by admin");
+  });
+
 
   // Toggle admin mode with Shift + A
   document.addEventListener("keydown", async (e) => {
@@ -959,6 +972,73 @@ function createAdminControls() {
   container.style.flexDirection = "column";
   container.style.alignItems = "flex-end";
   document.body.appendChild(container);
+
+  // clear all button
+  const clearBtn = document.createElement("button");
+  clearBtn.id = "admin-clear-all-button";
+  clearBtn.innerText = "Clear All Ships";
+  clearBtn.style.background = "#cc3333";
+  clearBtn.style.color = "#fff";
+  clearBtn.style.border = "1px solid #aa2222";
+  clearBtn.style.padding = "6px 10px";
+  clearBtn.style.borderRadius = "4px";
+  clearBtn.style.cursor = "pointer";
+  clearBtn.style.fontSize = "12px";
+  clearBtn.onclick = async () => {
+    const confirmed = confirm(
+      `Are you sure you want to delete ALL ships?\n\n` +
+      `This will:\n` +
+      `• Remove all ${ships.length} visible ships from the screen\n` +
+      `• Clear all ${messages.length} stored messages from server\n` +
+      `• This action CANNOT be undone\n\n` +
+      `Type "DELETE ALL" to confirm:`
+    );
+    
+    if (!confirmed) return;
+    
+    const confirmation = prompt("Type exactly: DELETE ALL");
+    if (confirmation !== "DELETE ALL") {
+      alert("Confirmation text didn't match. Operation cancelled.");
+      return;
+    }
+
+    try {
+      clearBtn.innerText = "Clearing...";
+      clearBtn.disabled = true;
+      
+      // Send clear request to server
+      const res = await fetch("/api/admin/clear-all", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: window._adminPassword }),
+      });
+      
+      if (res.ok) {
+        // Clear local state immediately
+        clearShips();
+        for (const s of circleShips) if (s && s.remove) s.remove();
+        circleShips = [];
+        messages = [];
+        
+        // Clear localStorage
+        try {
+          localStorage.removeItem("messages");
+        } catch (e) { /* ignore */ }
+        
+        alert("All ships cleared successfully!");
+      } else if (res.status === 401) {
+        alert("Unauthorized. Please re-authenticate as admin.");
+      } else {
+        alert(`Failed to clear ships: ${res.status}`);
+      }
+    } catch (err) {
+      alert("Error clearing ships: " + err.message);
+    } finally {
+      clearBtn.innerText = "Clear All Ships";
+      clearBtn.disabled = false;
+    }
+  };
+  container.appendChild(clearBtn);
 
   // toggle button
   const btn = document.createElement("button");
