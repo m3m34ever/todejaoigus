@@ -491,10 +491,32 @@ async function toggleCircleMode(force) {
     // hide original ships
     for (const s of ships) s.style.display = "none";
 
-    // create clones inside circle (after circle has correct size)
-    for (const m of messages) {
-      createShip(m, circle);
-    }
+    const shipDataToCreate = new Set();
+
+    messages.forEach(m => {
+      const key = `${m.text}_${!!m.hasEmail}`;
+      shipDataToCreate.add(JSON.stringify({ key, data: m }));
+    });
+
+
+    // Add from current ships that might not be in messages yet
+    ships.forEach(s => {
+      if (s.dataset && s.dataset.text) {
+        const hasEmail = s.dataset.hasEmail === "1";
+        const key = `${s.dataset.text}_${hasEmail}`;
+        const shipData = {
+          text: s.dataset.text,
+          hasEmail: hasEmail
+        };
+        shipDataToCreate.add(JSON.stringify({ key, data: shipData }));
+      }
+    });
+    
+    // Create unique ships in circle
+    shipDataToCreate.forEach(jsonStr => {
+      const { data } = JSON.parse(jsonStr);
+      createShip(data, circle);
+    });
 
     // start animation loop for circleShips
     if (!window._circleAnimating) {
@@ -744,7 +766,6 @@ document.addEventListener("DOMContentLoaded", () => {
       console.error("[RECONNECT] All reconnection attempts failed - this shouldn't happen with Infinity attempts");
     });
 
-    // ADD the missing newText handler here:
     socket.on("newText", (msg) => {
       const last = messages[messages.length - 1];
       if (last && last.text === msg.text && last.hasEmail === msg.hasEmail) {
@@ -762,6 +783,14 @@ document.addEventListener("DOMContentLoaded", () => {
       saveMessagesToLog();
       const created = createShip(msg);
       if (created && created.dataset) created.dataset.text = msg.text;
+
+      if (circleOverlayEl && circleOverlayEl.classList.contains("active")) {
+        const circle = circleOverlayEl.querySelector(".circle");
+        if (circle) {
+          console.log(`[CIRCLE MODE] Adding new ship to circle: ${msg.text.substring(0, 50)}${msg.text.length > 50 ? '...' : ''}`);
+          createShip(msg, circle);
+        }
+  }
       
       console.log(`[NEW MESSAGE] Received: ${msg.text.substring(0, 50)}${msg.text.length > 50 ? '...' : ''}`);
     });
@@ -807,6 +836,9 @@ document.addEventListener("DOMContentLoaded", () => {
       try {
         localStorage.removeItem("messages");
       } catch (e) { /* ignore */ }
+      if (circleOverlayEl && circleOverlayEl.classList.contains("active")) {
+        console.log("[CIRCLE MODE] All ships cleared from circle view");
+      }
     });
 
     socket.on("restoreAll", (msgs) => {
@@ -820,7 +852,15 @@ document.addEventListener("DOMContentLoaded", () => {
         messages.push(m);
         createShip(m);
       });
-      
+      if (circleOverlayEl && circleOverlayEl.classList.contains("active")) {
+        const circle = circleOverlayEl.querySelector(".circle");
+        if (circle) {
+          console.log(`[CIRCLE MODE] Restoring ${msgs.length} ships to circle view`);
+          msgs.forEach(m => {
+            createShip(m, circle);
+          });
+        }
+      }
       try {
         localStorage.setItem("messages", JSON.stringify(messages));
       } catch (e) { /* ignore */ }
