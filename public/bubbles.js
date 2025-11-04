@@ -843,7 +843,7 @@ document.addEventListener("DOMContentLoaded", () => {
           console.log(`[CIRCLE MODE] Adding new ship to circle: ${msg.text.substring(0, 50)}${msg.text.length > 50 ? '...' : ''}`);
           createShip(msg, circle);
         }
-  }
+      }  // ← FIXED: Added missing closing brace
       
       console.log(`[NEW MESSAGE] Received: ${msg.text.substring(0, 50)}${msg.text.length > 50 ? '...' : ''}`);
     });
@@ -1228,66 +1228,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   window.sendText = sendText;
 
-  // Socket.io events
-  socket.on("init", msgs => {
-    const wasEmpty = messages.length === 0;
-    const newCount = msgs.length;
-    const oldCount = messages.length;
-    
-    console.log(`[STATE SYNC] Received ${newCount} messages from server (had ${oldCount} locally)`);
-    
-    clearShips();
-    messages = [];
-    msgs.forEach(m => {
-      messages.push(m);
-      createShip(m);
-    });
-    
-    if (!window._shipsAnimating) {
-      window._shipsAnimating = true;
-      animateShips();
-    }
-    saveMessagesToLog();
-    
-    // Console log sync changes
-    if (wasConnected && newCount !== oldCount) {
-      const diff = newCount - oldCount;
-      if (diff > 0) {
-        console.log(`[STATE SYNC] ${diff} new messages added during disconnection`);
-      } else if (diff < 0) {
-        console.log(`[STATE SYNC] ${Math.abs(diff)} messages were removed during disconnection`);
-      }
-    }
-  });
-
-  socket.on("clearAll", () => {
-    console.log("[ADMIN] All ships cleared by admin");
-    clearShips();
-    for (const s of circleShips) if (s && s.remove) s.remove();
-    circleShips = [];
-    messages = [];
-    
-    try {
-      localStorage.removeItem("messages");
-    } catch (e) { /* ignore */ }
-  });
-
-  socket.on("restoreAll", (msgs) => {
-    console.log(`[ADMIN] All ships restored by admin (${msgs.length} messages)`);
-    clearShips();
-    for (const s of circleShips) if (s && s.remove) s.remove();
-    circleShips = [];
-    messages = [];
-    
-    msgs.forEach(m => {
-      messages.push(m);
-      createShip(m);
-    });
-    
-    try {
-      localStorage.setItem("messages", JSON.stringify(messages));
-    } catch (e) { /* ignore */ }
-  });
+  
 
   // Toggle admin mode with Shift + A
   document.addEventListener("keydown", async (e) => {
