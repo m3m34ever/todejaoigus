@@ -653,14 +653,182 @@ function animateShips(){
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  const socket = io();
-  window.socket = socket;
-  socket.on("connect", () => console.log("socket connected", socket.id));
-  socket.on("connect_error", (err) => console.error("socket connect_error", err));
-  socket.on("disconnect", (reason) => console.log("socket disconnected", reason));
+
   const textInput = document.getElementById("textInput");
-  const checkbox = document.getElementById("feedbackCheckbox");
+  const checkbox = document.getElementById("checkbox");
   const emailInput = document.getElementById("emailInput");
+
+  let reconnectAttempts = 0;
+  let wasConnected = false;
+  let socket = null;
+  
+  // Progressive reconnection thresholds
+  const FORCE_NEW_THRESHOLD = 10; // Force new connection after 10 failed attempts
+  const ESCALATION_THRESHOLD = 20; // More aggressive tactics after 20 attempts
+  
+  function createSocket(forceNew = false) {
+    if (socket) {
+      socket.removeAllListeners();
+      socket.disconnect();
+    }
+    
+    socket = io({
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      timeout: 20000,
+      forceNew: forceNew // This is the key change
+    });
+    
+    window.socket = socket;
+    setupSocketHandlers();
+    return socket;
+  }
+  
+  function setupSocketHandlers() {
+    socket.on("connect", () => {
+      console.log("socket connected", socket.id);
+      
+      if (wasConnected && reconnectAttempts > 0) {
+        console.log(`[RECONNECT] Successfully reconnected after ${reconnectAttempts} attempts ${socket.io.opts.forceNew ? '(forced new connection)' : ''}`);
+        
+        // Reset escalation after successful connection
+        reconnectAttempts = 0;
+      } else if (!wasConnected) {
+        console.log("[CONNECT] Initial connection established");
+      }
+      
+      wasConnected = true;
+    });
+
+    socket.on("disconnect", (reason) => {
+      console.log(`[DISCONNECT] Socket disconnected: ${reason}`);
+    });
+
+    socket.on("connect_error", (err) => {
+      console.error("[CONNECT ERROR] Socket connect_error:", err);
+    });
+
+    socket.on("reconnect_attempt", (attemptNumber) => {
+      reconnectAttempts = attemptNumber;
+      console.log(`[RECONNECT] Attempt #${attemptNumber}`);
+      
+      // Progressive escalation strategy
+      if (attemptNumber === FORCE_NEW_THRESHOLD) {
+        console.log(`[RECONNECT] ${FORCE_NEW_THRESHOLD} attempts failed - switching to forceNew: true`);
+        createSocket(true); // Force new connection
+        
+      } else if (attemptNumber === ESCALATION_THRESHOLD) {
+        console.log(`[RECONNECT] ${ESCALATION_THRESHOLD} attempts failed - trying complete reset`);
+        // Even more aggressive: wait longer then force new
+        setTimeout(() => {
+          createSocket(true);
+        }, 10000); // Wait 10 seconds before trying again
+        
+      } else if (attemptNumber > ESCALATION_THRESHOLD && attemptNumber % 30 === 0) {
+        // Every 30 attempts after escalation, try a complete reset
+        console.log(`[RECONNECT] Attempt ${attemptNumber} - periodic complete reset`);
+        setTimeout(() => {
+          createSocket(true);
+        }, 15000); // Wait 15 seconds
+      }
+    });
+
+    socket.on("reconnect", (attemptNumber) => {
+      console.log(`[RECONNECT] Reconnected after ${attemptNumber} attempts`);
+      reconnectAttempts = 0; // Reset counter on success
+    });
+
+    socket.on("reconnect_failed", () => {
+      console.error("[RECONNECT] All reconnection attempts failed - this shouldn't happen with Infinity attempts");
+    });
+
+    // ADD the missing newText handler here:
+    socket.on("newText", (msg) => {
+      const last = messages[messages.length - 1];
+      if (last && last.text === msg.text && last.hasEmail === msg.hasEmail) {
+        return; // duplicate, ignore
+      }
+
+      const exists = ships.some(s => s.dataset && s.dataset.text === msg.text);
+      if (exists) {
+        messages.push(msg);
+        saveMessagesToLog();
+        return;
+      }
+      
+      messages.push(msg);
+      saveMessagesToLog();
+      const created = createShip(msg);
+      if (created && created.dataset) created.dataset.text = msg.text;
+      
+      console.log(`[NEW MESSAGE] Received: ${msg.text.substring(0, 50)}${msg.text.length > 50 ? '...' : ''}`);
+    });
+
+    // Rest of your existing socket handlers (init, clearAll, restoreAll)...
+    socket.on("init", msgs => {
+      const wasEmpty = messages.length === 0;
+      const newCount = msgs.length;
+      const oldCount = messages.length;
+      
+      console.log(`[STATE SYNC] Received ${newCount} messages from server (had ${oldCount} locally)`);
+      
+      clearShips();
+      messages = [];
+      msgs.forEach(m => {
+        messages.push(m);
+        createShip(m);
+      });
+      
+      if (!window._shipsAnimating) {
+        window._shipsAnimating = true;
+        animateShips();
+      }
+      saveMessagesToLog();
+      
+      if (wasConnected && newCount !== oldCount) {
+        const diff = newCount - oldCount;
+        if (diff > 0) {
+          console.log(`[STATE SYNC] ${diff} new messages added during disconnection`);
+        } else if (diff < 0) {
+          console.log(`[STATE SYNC] ${Math.abs(diff)} messages were removed during disconnection`);
+        }
+      }
+    });
+
+    socket.on("clearAll", () => {
+      console.log("[ADMIN] All ships cleared by admin");
+      clearShips();
+      for (const s of circleShips) if (s && s.remove) s.remove();
+      circleShips = [];
+      messages = [];
+      
+      try {
+        localStorage.removeItem("messages");
+      } catch (e) { /* ignore */ }
+    });
+
+    socket.on("restoreAll", (msgs) => {
+      console.log(`[ADMIN] All ships restored by admin (${msgs.length} messages)`);
+      clearShips();
+      for (const s of circleShips) if (s && s.remove) s.remove();
+      circleShips = [];
+      messages = [];
+      
+      msgs.forEach(m => {
+        messages.push(m);
+        createShip(m);
+      });
+      
+      try {
+        localStorage.setItem("messages", JSON.stringify(messages));
+      } catch (e) { /* ignore */ }
+    });
+  }
+
+  // Initialize with normal connection first
+  createSocket(false);
 
   
 
@@ -938,26 +1106,28 @@ document.addEventListener("DOMContentLoaded", () => {
     const text = textInput.value.trim();
     const wantsFeedback = checkbox.checked;
     let email = null;
+    
     if (wantsFeedback && emailInput) {
       const v = emailInput.value.trim();
       const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
       if (v && emailPattern.test(v)) {
         email = v;
-      } else {
-        email = null;
       }
     }
+    
     if(text){
       if (!socket.connected) {
-        console.error("Socket not connected - cannot send message");
-        alert("Connection lost - please refresh the page");
+        console.error("[SEND] Socket not connected - cannot send message");
+        alert("Connection lost - your message will be sent when reconnected. Please wait...");
         return;
       }
+      
       const payload = { text };
-      if (email) payload.email = email; // only include email if valid
-      console.log("client emit newText ->", payload);
+      if (email) payload.email = email;
+      console.log("[SEND] client emit newText ->", payload);
       socket.emit("newText", payload);
+      
+      // Clear form
       if (textInput) { textInput.value = ""; textInput.style.height = "auto"; }
       if (checkbox) checkbox.checked = false;
       if (emailInput) { emailInput.value = ""; emailInput.style.display = "none"; }
@@ -967,39 +1137,38 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Socket.io events
   socket.on("init", msgs => {
+    const wasEmpty = messages.length === 0;
+    const newCount = msgs.length;
+    const oldCount = messages.length;
+    
+    console.log(`[STATE SYNC] Received ${newCount} messages from server (had ${oldCount} locally)`);
+    
     clearShips();
     messages = [];
     msgs.forEach(m => {
       messages.push(m);
       createShip(m);
     });
+    
     if (!window._shipsAnimating) {
       window._shipsAnimating = true;
       animateShips();
     }
     saveMessagesToLog();
+    
+    // Console log sync changes
+    if (wasConnected && newCount !== oldCount) {
+      const diff = newCount - oldCount;
+      if (diff > 0) {
+        console.log(`[STATE SYNC] ${diff} new messages added during disconnection`);
+      } else if (diff < 0) {
+        console.log(`[STATE SYNC] ${Math.abs(diff)} messages were removed during disconnection`);
+      }
+    }
   });
 
-  socket.on("newText", (msg) => {
-    const last = messages[messages.length - 1];
-    if (last && last.text === msg.text && last.hasEmail === msg.hasEmail) {
-      return; // duplicate, ignore
-    }
-
-    const exists = ships.some(s => s.dataset && s.dataset.text === msg.text);
-    if (exists) {
-      messages.push(msg);
-      saveMessagesToLog();
-      return;
-    }
-    messages.push(msg);
-    saveMessagesToLog();
-      // keep text cached on element for duplicate checks
-    const created = createShip(msg);
-    if (created && created.dataset) created.dataset.text = msg.text;
-  });
   socket.on("clearAll", () => {
-    // Server broadcasted clear all - update local state
+    console.log("[ADMIN] All ships cleared by admin");
     clearShips();
     for (const s of circleShips) if (s && s.remove) s.remove();
     circleShips = [];
@@ -1008,12 +1177,10 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       localStorage.removeItem("messages");
     } catch (e) { /* ignore */ }
-    
-    console.log("All ships cleared by admin");
   });
 
   socket.on("restoreAll", (msgs) => {
-    // Server broadcasted restore - rebuild ships from restored messages
+    console.log(`[ADMIN] All ships restored by admin (${msgs.length} messages)`);
     clearShips();
     for (const s of circleShips) if (s && s.remove) s.remove();
     circleShips = [];
@@ -1027,38 +1194,35 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       localStorage.setItem("messages", JSON.stringify(messages));
     } catch (e) { /* ignore */ }
-    
-    console.log(`All ships restored by admin (${msgs.length} messages)`);
   });
-
 
   // Toggle admin mode with Shift + A
   document.addEventListener("keydown", async (e) => {
     if (e.shiftKey && e.key.toLowerCase() === "a") {
       const input = prompt("Enter admin password:");
-      if (!input) return;
-      try {
-        const res = await fetch("/api/admin-auth", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ password: input }),
-        });
-        if (res.ok) {
-          adminMode = true;
-          window._adminPassword = input;
-          document.body.classList.add("admin-mode");
-          createAdminControls();
-          checkBackupStatus();
-          alert("Admin mode activated. You can now right-click ships to delete them.");
-        } else {
-          alert("Incorrect password.");
+        if (!input) return;
+        try {
+          const res = await fetch("/api/admin-auth", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ password: input }),
+          });
+          if (res.ok) {
+            adminMode = true;
+            window._adminPassword = input;
+            document.body.classList.add("admin-mode");
+            createAdminControls();
+            checkBackupStatus();
+            alert("Admin mode activated. You can now right-click ships to delete them.");
+          } else {
+            alert("Incorrect password.");
+          }
+        } catch (err) {
+          alert("Auth error, try again.");
         }
-      } catch (err) {
-        alert("Auth error, try again.");
       }
-    }
+    });
   });
-});
 
 async function checkBackupStatus() {
   if (!window._adminPassword) return;
