@@ -1067,14 +1067,44 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   if (!bg) return;
 
+  bg.addEventListener("loadstart", () => {
+    try {
+      bg.preload = "auto";
+      bg.crossOrigin = "anonymous";
+      bg.playsInline = true;
+      bg.setAttribute("webkit-playsinline", "true");
+      bg.setAttribute("x-webkit-airplay", "allow");
+    } catch (e) {}
+  });
+
+  // 2. Buffer optimization
+  bg.addEventListener("progress", () => {
+    try {
+      const buffered = bg.buffered;
+      if (buffered.length > 0) {
+        const bufferedEnd = buffered.end(buffered.length - 1);
+        const duration = bg.duration;
+        if (duration > 0 && bufferedEnd >= duration - 1) {
+          // Video is almost fully buffered - good for smooth looping
+          console.log("[SAFARI] Video buffer optimized for smooth looping");
+        }
+      }
+    } catch (e) {}
+  });
+
   // Force seamless looping for Chrome/Safari
   bg.addEventListener("timeupdate", () => {
     // More aggressive reset for Safari - catch it earlier
-    if (bg.duration > 0 && bg.currentTime >= bg.duration - 0.2 && !loopResetInProgress) {
-      loopResetInProgress = true;
-      bg.currentTime = 0;
-      // Give Safari time to process the reset
-      setTimeout(() => { loopResetInProgress = false; }, 100);
+    if (bg.duration > 0 && bg.currentTime >= bg.duration - 1.0 && bg.currentTime < bg.duration - 0.8) {
+      try {
+        // Hint to browser to prepare for loop restart
+        if (bg.buffered.length > 0 && bg.buffered.start(0) > 0.5) {
+          // Buffer doesn't include start - preload it
+          const tempTime = bg.currentTime;
+          bg.currentTime = 0.1;
+          setTimeout(() => { if (bg.currentTime < 1) bg.currentTime = tempTime; }, 50);
+        }
+      } catch (e) {}
     }
   });
 
@@ -1106,9 +1136,13 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       bg.playbackRate = 1.0;
       // Safari-specific: ensure the video is ready for seamless looping
-      if (bg.duration > 0) {
-        bg.currentTime = 0; // Start from beginning
-      }
+      const preloadTime = Math.max(0, bg.duration - 2);
+      bg.currentTime = preloadTime;
+      
+      setTimeout(() => {
+        bg.currentTime = 0; // Reset to beginning
+        if (!bg.paused) bg.play().catch(() => {});
+      }, 200);
     } catch (e) {}
   });
 
@@ -1118,19 +1152,26 @@ document.addEventListener("DOMContentLoaded", () => {
     bg.loop = true;
   });
   let lastTime = 0;
+  let frameCount = 0;
+
   function safariLoopMonitor() {
     if (bg && bg.duration > 0 && !bg.paused && !bg.ended) {
-      const currentTime = bg.currentTime;
+    const currentTime = bg.currentTime;
+    frameCount++;
+    
+    // Multiple detection strategies for better coverage
+    const nearEnd = currentTime >= bg.duration - 0.1;
+    const timeStuck = Math.abs(currentTime - lastTime) < 0.005 && currentTime > bg.duration - 0.5;
+    const frameStuck = frameCount % 60 === 0 && currentTime > bg.duration - 0.3;
+    
+    // Trigger reset if any condition is met
+    if ((nearEnd || timeStuck || frameStuck) && !loopResetInProgress) {
+      console.log("[SAFARI] Enhanced loop reset triggered");
+      loopResetInProgress = true;
       
-      // Detect if we're very close to the end or if time hasn't progressed
-      if (currentTime >= bg.duration - 0.1 || 
-          (currentTime > 0 && Math.abs(currentTime - lastTime) < 0.01 && currentTime > bg.duration - 0.5)) {
-        if (!loopResetInProgress) {
-          console.log("[SAFARI] Manual loop reset triggered");
-          loopResetInProgress = true;
-          bg.currentTime = 0;
+      // Smoother reset with easing (optional - test if it helps)
+      bg.currentTime = 0;
           setTimeout(() => { loopResetInProgress = false; }, 150);
-        }
       }
       
       lastTime = currentTime;

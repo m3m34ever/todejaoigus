@@ -142,6 +142,13 @@ body {
   object-position: 50% var(--video-y, 50%);
   background-color: #000; /* avoid visible gaps */
   z-index: 0;
+  will-change: transform, opacity;
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  transform-style: preserve-3d;
+  -webkit-transform-style: preserve-3d;
 }
 @media (orientation: portrait), (max-aspect-ratio: 3/4) {
   #bgVideo {
