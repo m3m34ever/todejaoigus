@@ -157,13 +157,47 @@ function createShip(msg, container = document.body) {
   const previewText = (msg && msg.text) ? String(msg.text) : "";
 
   // Right-click to delete (only in admin mode)
-  div.addEventListener("contextmenu", (e) => {
+  div.addEventListener("contextmenu", async (e) => {
     e.preventDefault();
     if (!adminMode) return; // only allow if admin
 
-    const confirmDelete = confirm("Delete this ship from view?");
-    if (confirmDelete) {
-      div.remove(); // remove from DOM
+    const shipText = div.dataset.text;
+    const confirmDelete = confirm(`Delete this ship from everywhere?\n\nText: "${shipText.length > 100 ? shipText.substring(0, 100) + '...' : shipText}"\n\nThis will remove it from all clients and the server.`);
+    if (!confirmDelete) return;
+
+    try {
+      // Send deletion request to server
+      const res = await fetch("/api/admin/delete-ship", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          password: window._adminPassword, 
+          shipText: shipText 
+        }),
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        if (data.deleted > 0) {
+          console.log(`[ADMIN] Successfully deleted ship from server: "${shipText.substring(0, 50)}..."`);
+          // Local removal will happen via the deleteShip socket event
+        } else {
+          console.log(`[ADMIN] Ship not found on server, removing locally only`);
+          // Remove locally anyway
+          div.remove();
+          ships = ships.filter(s => s !== div);
+          circleShips = circleShips.filter(s => s !== div);
+        }
+      } else if (res.status === 401) {
+        alert("Unauthorized. Please re-authenticate as admin.");
+      } else {
+        alert(`Failed to delete ship from server: ${res.status}`);
+      }
+    } catch (err) {
+      console.error("Error deleting ship:", err);
+      alert("Error deleting ship: " + err.message);
+      // Still remove locally as fallback
+      div.remove();
       ships = ships.filter(s => s !== div);
       circleShips = circleShips.filter(s => s !== div);
     }
@@ -848,6 +882,8 @@ document.addEventListener("DOMContentLoaded", () => {
       console.log(`[NEW MESSAGE] Received: ${msg.text.substring(0, 50)}${msg.text.length > 50 ? '...' : ''}`);
     });
 
+    
+
     // Rest of your existing socket handlers (init, clearAll, restoreAll)...
     socket.on("init", msgs => {
       const wasEmpty = messages.length === 0;
@@ -917,6 +953,31 @@ document.addEventListener("DOMContentLoaded", () => {
       try {
         localStorage.setItem("messages", JSON.stringify(messages));
       } catch (e) { /* ignore */ }
+    });
+
+    socket.on("deleteShip", (data) => {
+      const shipText = data.shipText;
+      console.log(`[ADMIN] Ship deleted by admin: "${shipText.substring(0, 50)}${shipText.length > 50 ? '...' : ''}"`);
+      
+      // Remove from main view ships
+      const mainShipsToRemove = ships.filter(s => s.dataset && s.dataset.text === shipText);
+      mainShipsToRemove.forEach(ship => {
+        ship.remove();
+        ships = ships.filter(s => s !== ship);
+      });
+      
+      // Remove from circle view ships
+      const circleShipsToRemove = circleShips.filter(s => s.dataset && s.dataset.text === shipText);
+      circleShipsToRemove.forEach(ship => {
+        ship.remove();
+        circleShips = circleShips.filter(s => s !== ship);
+      });
+      
+      // Remove from local messages array
+      messages = messages.filter(m => m.text !== shipText);
+      saveMessagesToLog();
+      
+      console.log(`[ADMIN] Removed ${mainShipsToRemove.length} ships from main view and ${circleShipsToRemove.length} ships from circle view`);
     });
   }
 
@@ -1258,27 +1319,27 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-async function checkBackupStatus() {
-  if (!window._adminPassword) return;
-  try {
-    const res = await fetch("/api/admin/backup-status", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password: window._adminPassword }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      const undoBtn = document.getElementById("admin-undo-button");
-      if (undoBtn && data.hasBackup) {
-        undoBtn.style.display = "block";
-        // Optionally show backup info in button text
-        const count = data.backupInfo?.messageCount || 0;
-        undoBtn.innerText = `Undo Clear All (${count} ships)`;
+  async function checkBackupStatus() {
+    if (!window._adminPassword) return;
+    try {
+      const res = await fetch("/api/admin/backup-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: window._adminPassword }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const undoBtn = document.getElementById("admin-undo-button");
+        if (undoBtn && data.hasBackup) {
+          undoBtn.style.display = "block";
+          // Optionally show backup info in button text
+          const count = data.backupInfo?.messageCount || 0;
+          undoBtn.innerText = `Undo Clear All (${count} ships)`;
+        }
       }
+    } catch (err) {
+      console.error("Error checking backup status:", err);
     }
-  } catch (err) {
-    console.error("Error checking backup status:", err);
-  }
 }
 
 function createAdminControls() {

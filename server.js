@@ -280,6 +280,50 @@ io.on("connection", (socket) => {
   
 });
 
+app.post("/api/admin/delete-ship", (req, res) => {
+  try {
+    const ip = getIpFromReq(req);
+    const supplied = req.body?.password;
+    const shipText = req.body?.shipText;
+    const time = new Date().toISOString();
+
+    if (!supplied || supplied !== ADMIN_PASSWORD) {
+      fs.appendFile(LOG_FILE, `[ADMIN DELETE SHIP] [${time}] IP: ${ip || 'unknown'} - unauthorized attempt\n`, (e)=>{ if(e) console.error(e); });
+      return res.status(401).json({ ok: false, error: "unauthorized" });
+    }
+
+    if (!shipText) {
+      return res.status(400).json({ ok: false, error: "missing_ship_text" });
+    }
+
+    // Find and remove the ship from messages array
+    const initialCount = messages.length;
+    messages = messages.filter(m => m.text !== shipText);
+    const deletedCount = initialCount - messages.length;
+    
+    if (deletedCount > 0) {
+      // Save updated state to file
+      saveState();
+      
+      // Log the deletion
+      const logEntry = `[ADMIN DELETE SHIP] [${time}] IP: ${ip || 'unknown'} - deleted ship: "${shipText.substring(0, 100)}${shipText.length > 100 ? '...' : ''}"\n`;
+      fs.appendFile(LOG_FILE, logEntry, (e)=>{ if(e) console.error(e); });
+      
+      // Broadcast deletion to all connected clients
+      io.emit("deleteShip", { shipText });
+      
+      console.log(`[ADMIN] Deleted ship "${shipText.substring(0, 50)}..." from ${ip || 'unknown'}`);
+      res.json({ ok: true, deleted: deletedCount });
+    } else {
+      res.json({ ok: true, deleted: 0, message: "Ship not found" });
+    }
+    
+  } catch (err) {
+    console.error("Error in admin delete-ship:", err);
+    res.status(500).json({ ok: false, error: "internal_error" });
+  }
+});
+
 app.post("/api/admin/clear-all", (req, res) => {
   try {
     const ip = getIpFromReq(req);
