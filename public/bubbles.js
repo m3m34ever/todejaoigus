@@ -483,8 +483,8 @@ function updateCircleStyles(){
     const centerX = rect.width / 2;
     const centerY = rect.height / 2;
     const radius = Math.min(centerX, centerY) - 40; // Visible circle boundary
-    const shipSize = 60;
-    const maxDistance = radius + shipSize; // Allow ships to be outside for wrapping
+    const shipSize = 80; // Match the animation logic
+    const maxDistance = radius + (shipSize * 2); // Much larger tolerance for "lost" ships
     
     for (const s of circleShips) {
       if (!s) continue;
@@ -493,21 +493,21 @@ function updateCircleStyles(){
       if (typeof s.x !== "number" || typeof s.y !== "number") {
         // Generate random position within visible circle
         const angle = Math.random() * 2 * Math.PI;
-        const r = Math.random() * radius;
+        const r = Math.random() * (radius - 20); // Keep ships well inside
         s.x = centerX + Math.cos(angle) * r;
         s.y = centerY + Math.sin(angle) * r;
       } else {
-        // Check if ship is way too far outside (beyond wrapping zone)
+        // Check if ship is WAY too far outside (truly lost ships only)
         const dx = s.x - centerX;
         const dy = s.y - centerY;
         const distanceFromCenter = Math.sqrt(dx * dx + dy * dy);
         
-        // Only reposition if ship is way beyond the wrapping zone (lost ships)
-        if (distanceFromCenter > maxDistance * 2) {
-          console.log(`[CIRCLE] Repositioning lost ship at distance ${distanceFromCenter.toFixed(1)}`);
+        // Only reposition ships that are EXTREMELY far outside (lost ships)
+        if (distanceFromCenter > maxDistance) {
+          console.log(`[CIRCLE] Repositioning truly lost ship at distance ${distanceFromCenter.toFixed(1)} (max: ${maxDistance.toFixed(1)})`);
           // Move ship to a random position within visible circle
           const angle = Math.random() * 2 * Math.PI;
-          const r = Math.random() * radius;
+          const r = Math.random() * (radius - 20);
           s.x = centerX + Math.cos(angle) * r;
           s.y = centerY + Math.sin(angle) * r;
         }
@@ -560,31 +560,34 @@ async function toggleCircleMode(force) {
     // hide original ships
     for (const s of ships) s.style.display = "none";
 
-    const shipDataToCreate = new Set();
-
-    messages.forEach(m => {
-      const key = `${m.text}_${!!m.hasEmail}`;
-      shipDataToCreate.add(JSON.stringify({ key, data: m }));
-    });
-
 
     // Add from current ships that might not be in messages yet
-    ships.forEach(s => {
-      if (s.dataset && s.dataset.text) {
-        const hasEmail = s.dataset.hasEmail === "1";
-        const key = `${s.dataset.text}_${hasEmail}`;
-        const shipData = {
-          text: s.dataset.text,
-          hasEmail: hasEmail
-        };
-        shipDataToCreate.add(JSON.stringify({ key, data: shipData }));
+    // SIMPLE APPROACH: Sync current ships to messages, then create from messages
+    ships.forEach(ship => {
+      if (ship.dataset && ship.dataset.text) {
+        const shipText = ship.dataset.text;
+        const shipHasEmail = ship.dataset.hasEmail === "1";
+        
+        const exists = messages.some(m => 
+          m.text === shipText && (!!m.hasEmail) === shipHasEmail
+        );
+        
+        if (!exists) {
+          console.log(`[CIRCLE] Adding recent ship to messages: "${shipText.substring(0, 30)}..."`);
+          messages.push({
+            text: shipText,
+            hasEmail: shipHasEmail,
+            time: new Date().toISOString()
+          });
+        }
       }
     });
     
-    // Create unique ships in circle
-    shipDataToCreate.forEach(jsonStr => {
-      const { data } = JSON.parse(jsonStr);
-      createShip(data, circle);
+    saveMessagesToLog();
+
+    // Create all ships in circle from the complete messages array
+    messages.forEach(m => {
+      createShip(m, circle);
     });
 
     // start animation loop for circleShips
@@ -594,16 +597,15 @@ async function toggleCircleMode(force) {
         const rect = circle.getBoundingClientRect();
         const centerX = rect.width / 2;
         const centerY = rect.height / 2;
-        const radius = Math.min(centerX, centerY) - 40; // Leave some margin from edge
-        const shipSize = 60; //  ship size for proper hiding
-        const exitRadius = radius + shipSize; // allow ships to fully exit before wrapping
+        const radius = Math.min(centerX, centerY) - 40;
+        const shipSize = 100; // INCREASED - ships must be completely hidden before wrapping
+        const exitRadius = radius + shipSize;
         
         for (let div of circleShips) {
           // Initialize position within circle if not set
           if (typeof div.x !== "number" || typeof div.y !== "number") {
-            // Generate random position within circle
             const angle = Math.random() * 2 * Math.PI;
-            const r = Math.random() * radius;
+            const r = Math.random() * (radius - 30); // Keep ships well inside initially
             div.x = centerX + Math.cos(angle) * r;
             div.y = centerY + Math.sin(angle) * r;
           }
@@ -612,22 +614,22 @@ async function toggleCircleMode(force) {
           div.x += div.vx + Math.sin(Date.now()*0.001 + div.x) * 0.2;
           div.y += div.vy + Math.cos(Date.now()*0.001 + div.y) * 0.2;
 
-          // Check if ship is outside circle and wrap to opposite side
+          // Check if ship is COMPLETELY outside the visible circle
           const dx = div.x - centerX;
           const dy = div.y - centerY;
           const distanceFromCenter = Math.sqrt(dx * dx + dy * dy);
           
           if (distanceFromCenter > exitRadius) {
-            // Ship is completely hidden - now wrap to opposite side
+            // Ship is completely hidden - wrap to opposite side
             const exitAngle = Math.atan2(dy, dx);
-            const entryAngle = exitAngle + Math.PI; // Opposite side
+            const entryAngle = exitAngle + Math.PI;
             
-            // Place ship just outside the circle on the opposite side (will animate in)
-            const entryDistance = radius + (shipSize * 0.8); // Start slightly outside
+            // Place ship well outside on opposite side
+            const entryDistance = radius + (shipSize * 0.9);
             div.x = centerX + Math.cos(entryAngle) * entryDistance;
             div.y = centerY + Math.sin(entryAngle) * entryDistance;
             
-            console.log(`[CIRCLE] Ship wrapped from ${exitAngle.toFixed(2)} to ${entryAngle.toFixed(2)}`);
+            console.log(`[CIRCLE] Ship wrapped at distance ${distanceFromCenter.toFixed(1)} -> ${entryDistance.toFixed(1)}`);
           }
 
           // Apply position and rotation
