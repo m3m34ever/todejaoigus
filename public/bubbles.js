@@ -595,6 +595,8 @@ async function toggleCircleMode(force) {
         const centerX = rect.width / 2;
         const centerY = rect.height / 2;
         const radius = Math.min(centerX, centerY) - 40; // Leave some margin from edge
+        const shipSize = 60; //  ship size for proper hiding
+        const exitRadius = radius + shipSize; // allow ships to fully exit before wrapping
         
         for (let div of circleShips) {
           // Initialize position within circle if not set
