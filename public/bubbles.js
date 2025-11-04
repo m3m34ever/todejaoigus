@@ -1104,7 +1104,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Send text
   function sendText(){
     const text = textInput.value.trim();
-    const wantsFeedback = checkbox.checked;
+    const wantsFeedback = checkbox ? checkbox.checked : false;
     let email = null;
     
     if (wantsFeedback && emailInput) {
