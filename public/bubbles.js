@@ -655,7 +655,7 @@ function animateShips(){
 document.addEventListener("DOMContentLoaded", () => {
 
   const textInput = document.getElementById("textInput");
-  const checkbox = document.getElementById("checkbox");
+  const checkbox = document.getElementById("feedbackCheckbox");
   const emailInput = document.getElementById("emailInput");
 
   let reconnectAttempts = 0;
