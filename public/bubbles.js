@@ -173,19 +173,30 @@ function createShip(msg, container = document.body) {
   const containerRect = (container === document.body) 
     ? { width: window.innerWidth, height: window.innerHeight } 
     : container.getBoundingClientRect();
-  div.x = Math.random() * Math.max(1, containerRect.width - 100);
-  div.y = Math.random() * Math.max(1, containerRect.height - 100);
-  div.style.position = "absolute";
+    
   if (container === document.body) {
-    div.style.left = div.x + "px";
-    div.style.top = div.y + "px";
+    div.x = Math.random() * Math.max(1, containerRect.width - 100);
+    div.y = Math.random() * Math.max(1, containerRect.height - 100);
   } else {
+    // For circle container, position within circular area
+    const centerX = containerRect.width / 2;
+    const centerY = containerRect.height / 2;
+    const radius = Math.min(centerX, centerY) - 40;
+    
+    // Generate random position within circle
+    const angle = Math.random() * 2 * Math.PI;
+    const r = Math.random() * radius;
+    div.x = centerX + Math.cos(angle) * r;
+    div.y = centerY + Math.sin(angle) * r;
+  }
+  
+  div.style.position = "absolute";
+  div.style.left = div.x + "px";
+  div.style.top = div.y + "px";
+  
   // For circle container, ensure container is positioned
-    if (getComputedStyle(container).position === "static") {
-      container.style.position = "relative";
-    }
-    div.style.left = div.x + "px";
-    div.style.top = div.y + "px";
+  if (container !== document.body && getComputedStyle(container).position === "static") {
+    container.style.position = "relative";
   }
 
   // Random initial direction and speed
@@ -435,15 +446,35 @@ function updateCircleStyles(){
 
   try {
     const rect = circle.getBoundingClientRect();
+    const centerX = rect.width / 2;
+    const centerY = rect.height / 2;
+    const radius = Math.min(centerX, centerY) - 40; // Leave margin from edge
+    
     for (const s of circleShips) {
       if (!s) continue;
-      // clamp by rect, keep a margin equal to element size
-      const elW = s.offsetWidth || 40;
-      const elH = s.offsetHeight || 40;
-      s.x = (typeof s.x === "number") ? s.x : Math.random() * Math.max(1, rect.width - elW);
-      s.y = (typeof s.y === "number") ? s.y : Math.random() * Math.max(1, rect.height - elH);
-      s.x = Math.max(0, Math.min(rect.width - elW, s.x));
-      s.y = Math.max(0, Math.min(rect.height - elH, s.y));
+      
+      // If ship doesn't have position or is outside circle, reposition it
+      if (typeof s.x !== "number" || typeof s.y !== "number") {
+        // Generate random position within circle
+        const angle = Math.random() * 2 * Math.PI;
+        const r = Math.random() * radius;
+        s.x = centerX + Math.cos(angle) * r;
+        s.y = centerY + Math.sin(angle) * r;
+      } else {
+        // Check if existing position is outside circle and move it inside
+        const dx = s.x - centerX;
+        const dy = s.y - centerY;
+        const distanceFromCenter = Math.sqrt(dx * dx + dy * dy);
+        
+        if (distanceFromCenter > radius) {
+          // Move ship to a random position within circle
+          const angle = Math.random() * 2 * Math.PI;
+          const r = Math.random() * radius;
+          s.x = centerX + Math.cos(angle) * r;
+          s.y = centerY + Math.sin(angle) * r;
+        }
+      }
+      
       s.style.left = Math.round(s.x) + "px";
       s.style.top = Math.round(s.y) + "px";
     }
@@ -523,19 +554,41 @@ async function toggleCircleMode(force) {
       window._circleAnimating = true;
       (function animateCircleShips(){
         const rect = circle.getBoundingClientRect();
+        const centerX = rect.width / 2;
+        const centerY = rect.height / 2;
+        const radius = Math.min(centerX, centerY) - 40; // Leave some margin from edge
+        
         for (let div of circleShips) {
-          if (typeof div.x !== "number") {
-            div.x = Math.random() * Math.max(1, rect.width - 60);
-            div.y = Math.random() * Math.max(1, rect.height - 60);
+          // Initialize position within circle if not set
+          if (typeof div.x !== "number" || typeof div.y !== "number") {
+            // Generate random position within circle
+            const angle = Math.random() * 2 * Math.PI;
+            const r = Math.random() * radius;
+            div.x = centerX + Math.cos(angle) * r;
+            div.y = centerY + Math.sin(angle) * r;
           }
+          
+          // Update position
           div.x += div.vx + Math.sin(Date.now()*0.001 + div.x) * 0.2;
           div.y += div.vy + Math.cos(Date.now()*0.001 + div.y) * 0.2;
 
-          if (div.x < -80) div.x = rect.width;
-          if (div.x > rect.width) div.x = -80;
-          if (div.y < -80) div.y = rect.height;
-          if (div.y > rect.height) div.y = -80;
+          // Check if ship is outside circle and wrap to opposite side
+          const dx = div.x - centerX;
+          const dy = div.y - centerY;
+          const distanceFromCenter = Math.sqrt(dx * dx + dy * dy);
+          
+          if (distanceFromCenter > radius) {
+            // Ship is outside circle - wrap to opposite side
+            const angle = Math.atan2(dy, dx);
+            const oppositeAngle = angle + Math.PI;
+            
+            // Place ship at opposite edge of circle (slightly inside)
+            const newDistance = radius - 20; // 20px inside the edge
+            div.x = centerX + Math.cos(oppositeAngle) * newDistance;
+            div.y = centerY + Math.sin(oppositeAngle) * newDistance;
+          }
 
+          // Apply position and rotation
           div.style.left = div.x + "px";
           div.style.top = div.y + "px";
           div.style.transform = `rotate(${div.angle}deg)`;
