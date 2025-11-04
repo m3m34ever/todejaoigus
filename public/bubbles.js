@@ -482,26 +482,30 @@ function updateCircleStyles(){
     const rect = circle.getBoundingClientRect();
     const centerX = rect.width / 2;
     const centerY = rect.height / 2;
-    const radius = Math.min(centerX, centerY) - 40; // Leave margin from edge
+    const radius = Math.min(centerX, centerY) - 40; // Visible circle boundary
+    const shipSize = 60;
+    const maxDistance = radius + shipSize; // Allow ships to be outside for wrapping
     
     for (const s of circleShips) {
       if (!s) continue;
       
-      // If ship doesn't have position or is outside circle, reposition it
+      // If ship doesn't have position, place it within visible circle
       if (typeof s.x !== "number" || typeof s.y !== "number") {
-        // Generate random position within circle
+        // Generate random position within visible circle
         const angle = Math.random() * 2 * Math.PI;
         const r = Math.random() * radius;
         s.x = centerX + Math.cos(angle) * r;
         s.y = centerY + Math.sin(angle) * r;
       } else {
-        // Check if existing position is outside circle and move it inside
+        // Check if ship is way too far outside (beyond wrapping zone)
         const dx = s.x - centerX;
         const dy = s.y - centerY;
         const distanceFromCenter = Math.sqrt(dx * dx + dy * dy);
         
-        if (distanceFromCenter > radius) {
-          // Move ship to a random position within circle
+        // Only reposition if ship is way beyond the wrapping zone (lost ships)
+        if (distanceFromCenter > maxDistance * 2) {
+          console.log(`[CIRCLE] Repositioning lost ship at distance ${distanceFromCenter.toFixed(1)}`);
+          // Move ship to a random position within visible circle
           const angle = Math.random() * 2 * Math.PI;
           const r = Math.random() * radius;
           s.x = centerX + Math.cos(angle) * r;
@@ -611,15 +615,17 @@ async function toggleCircleMode(force) {
           const dy = div.y - centerY;
           const distanceFromCenter = Math.sqrt(dx * dx + dy * dy);
           
-          if (distanceFromCenter > radius) {
-            // Ship is outside circle - wrap to opposite side
-            const angle = Math.atan2(dy, dx);
-            const oppositeAngle = angle + Math.PI;
+          if (distanceFromCenter > exitRadius) {
+            // Ship is completely hidden - now wrap to opposite side
+            const exitAngle = Math.atan2(dy, dx);
+            const entryAngle = exitAngle + Math.PI; // Opposite side
             
-            // Place ship at opposite edge of circle (slightly inside)
-            const newDistance = radius - 20; // 20px inside the edge
-            div.x = centerX + Math.cos(oppositeAngle) * newDistance;
-            div.y = centerY + Math.sin(oppositeAngle) * newDistance;
+            // Place ship just outside the circle on the opposite side (will animate in)
+            const entryDistance = radius + (shipSize * 0.8); // Start slightly outside
+            div.x = centerX + Math.cos(entryAngle) * entryDistance;
+            div.y = centerY + Math.sin(entryAngle) * entryDistance;
+            
+            console.log(`[CIRCLE] Ship wrapped from ${exitAngle.toFixed(2)} to ${entryAngle.toFixed(2)}`);
           }
 
           // Apply position and rotation
