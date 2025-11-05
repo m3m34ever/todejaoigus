@@ -1109,6 +1109,83 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       }
     });
+
+    bg.addEventListener("loadedmetadata", () => {
+      try {
+        // Ensure no poster frame is shown
+        bg.removeAttribute("poster");
+        bg.poster = "";
+        
+        // Force preload of entire video
+        bg.preload = "auto";
+        
+        // Ensure seamless looping
+        bg.loop = true;
+        
+        // Set initial time to avoid showing first frame statically
+        if (bg.duration > 0) {
+          bg.currentTime = 0.1; // Start slightly after beginning
+          setTimeout(() => {
+            bg.currentTime = 0; // Reset to true beginning
+          }, 100);
+        }
+      } catch (e) {
+        console.error("[VIDEO] Metadata setup error:", e);
+      }
+    });
+
+    // Force continuous playback during transitions
+    bg.addEventListener("seeking", (e) => {
+      console.log("[VIDEO] Seeking detected at", bg.currentTime);
+    });
+
+    bg.addEventListener("seeked", (e) => {
+      console.log("[VIDEO] Seek completed at", bg.currentTime);
+      // Ensure playback resumes immediately after seek
+      if (!bg.paused) {
+        bg.play().catch(() => {});
+      }
+    });
+
+    // Prevent any pause/static frames during loop
+    bg.addEventListener("pause", (e) => {
+      if (bg.currentTime >= bg.duration - 0.2) {
+        console.log("[VIDEO] Prevented pause during loop transition");
+        e.preventDefault();
+        bg.play().catch(() => {});
+      }
+    });
+
+    // Enhanced loop handling to prevent static frames
+    bg.addEventListener("timeupdate", () => {
+      if (bg.duration > 0) {
+        const timeRemaining = bg.duration - bg.currentTime;
+        
+        // Very close to end - prepare for seamless loop
+        if (timeRemaining <= 0.05 && timeRemaining > 0.02) {
+          try {
+            // Ensure video stays in playing state
+            if (bg.paused) {
+              bg.play().catch(() => {});
+            }
+            
+            // Pre-seek to beginning to avoid static frame
+            const tempCurrentTime = bg.currentTime;
+            bg.currentTime = 0.01;
+            
+            // Immediately return to current position to continue playing
+            setTimeout(() => {
+              if (bg.currentTime < 0.5) {
+                bg.currentTime = tempCurrentTime;
+              }
+            }, 10);
+            
+          } catch (e) {
+            console.error("[VIDEO] Loop preparation error:", e);
+          }
+        }
+      }
+    });
     // prefer an existing button in HTML, otherwise create one
     let btn = document.getElementById("bgPlayBtn");
     if (!btn) {
