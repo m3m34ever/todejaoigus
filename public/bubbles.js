@@ -1043,69 +1043,23 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // ADD this as an additional timeupdate listener (don't replace your existing one):
     bg.addEventListener("timeupdate", () => {
-      if (bg.duration > 0 && !isBlending) {
+      if (bg.duration > 0) {
         const timeRemaining = bg.duration - bg.currentTime;
         
-        // Capture frame just before loop point
-        if (timeRemaining <= 0.2 && timeRemaining > 0.15 && !capturedFrame) {
-          try {
-            canvas.width = bg.videoWidth || 1920;
-            canvas.height = bg.videoHeight || 1080;
-            ctx.drawImage(bg, 0, 0, canvas.width, canvas.height);
-            capturedFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            console.log("[BLEND] Captured end frame for blending");
-          } catch (e) {
-            console.error("[BLEND] Failed to capture frame:", e);
-          }
-        }
-        
-        // Start blending at loop point
-        if (timeRemaining <= 0.1 && capturedFrame && !isBlending) {
-          isBlending = true;
-          canvas.style.display = "block";
-          console.log("[BLEND] Starting canvas crossfade");
+        // Apply subtle motion blur during the critical transition moment
+        if (timeRemaining <= 0.08 && timeRemaining > 0.02) {
+          // Create motion blur effect to mask the static frame
+          bg.style.transition = "filter 0.06s ease-out";
+          bg.style.filter = "blur(0.8px) brightness(0.96) contrast(1.02)";
           
-          const blendDuration = 300; // ms
-          const startTime = performance.now();
+          console.log("[MOTION BLUR] Masking loop transition");
           
-          function blendFrame() {
-            if (!isBlending) return;
-            
-            const elapsed = performance.now() - startTime;
-            const progress = Math.min(elapsed / blendDuration, 1);
-            
-            try {
-              ctx.drawImage(bg, 0, 0, canvas.width, canvas.height);
-              const currentFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
-              const blendedData = new Uint8ClampedArray(currentFrame.data);
-              const alpha = 1 - progress;
-              
-              for (let i = 0; i < blendedData.length; i += 4) {
-                blendedData[i] = currentFrame.data[i] * progress + capturedFrame.data[i] * alpha;
-                blendedData[i + 1] = currentFrame.data[i + 1] * progress + capturedFrame.data[i + 1] * alpha;
-                blendedData[i + 2] = currentFrame.data[i + 2] * progress + capturedFrame.data[i + 2] * alpha;
-              }
-              
-              const blendedFrame = new ImageData(blendedData, canvas.width, canvas.height);
-              ctx.putImageData(blendedFrame, 0, 0);
-              
-              if (progress < 1) {
-                requestAnimationFrame(blendFrame);
-              } else {
-                canvas.style.display = "none";
-                isBlending = false;
-                capturedFrame = null;
-                console.log("[BLEND] Crossfade complete");
-              }
-            } catch (e) {
-              console.error("[BLEND] Frame blending error:", e);
-              canvas.style.display = "none";
-              isBlending = false;
-              capturedFrame = null;
-            }
-          }
-          
-          requestAnimationFrame(blendFrame);
+          setTimeout(() => {
+            bg.style.filter = "none";
+            setTimeout(() => {
+              bg.style.transition = "";
+            }, 70);
+          }, 60);
         }
       }
     });
