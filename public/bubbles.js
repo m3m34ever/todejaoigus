@@ -483,38 +483,47 @@ function updateCircleStyles(){
     const centerX = rect.width / 2;
     const centerY = rect.height / 2;
     const radius = Math.min(centerX, centerY) - 40; // Visible circle boundary
-    const shipSize = 80; // Match the animation logic
+    const shipSize = 150; // Match the animation logic
+    const safeRadius = radius - 20; // Safe zone inside circle
     const maxDistance = radius + (shipSize * 2); // Much larger tolerance for "lost" ships
     
     for (const s of circleShips) {
       if (!s) continue;
+
+      const dx = s.x - centerX;
+      const dy = s.y - centerY;
+      const distanceFromCenter = Math.sqrt(dx * dx + dy * dy);
       
       // If ship doesn't have position, place it within visible circle
-      if (typeof s.x !== "number" || typeof s.y !== "number") {
+      if (typeof s.x !== "number" || typeof s.y !== "number" || distanceFromCenter > safeRadius) {
         // Generate random position within visible circle
+        console.log(`[CIRCLE] Repositioning ship due to resize - distance: ${distanceFromCenter.toFixed(1)}, radius: ${radius.toFixed(1)}`);
+        
+        // Generate random position within safe circle area
         const angle = Math.random() * 2 * Math.PI;
-        const r = Math.random() * (radius - 20); // Keep ships well inside
+        const r = Math.random() * safeRadius;
         s.x = centerX + Math.cos(angle) * r;
         s.y = centerY + Math.sin(angle) * r;
+        
+        // Reset ship position immediately
+        s.style.left = Math.round(s.x) + "px";
+        s.style.top = Math.round(s.y) + "px";
+      } else if (distanceFromCenter > maxDistance) {
+        console.log(`[CIRCLE] Repositioning lost ship at distance ${distanceFromCenter.toFixed(1)} (max: ${maxDistance.toFixed(1)})`);
+        // Move ship to a random position within visible circle
+        const angle = Math.random() * 2 * Math.PI;
+        const r = Math.random() * safeRadius;
+        s.x = centerX + Math.cos(angle) * r;
+        s.y = centerY + Math.sin(angle) * r;
+        
+        // Reset ship position immediately
+        s.style.left = Math.round(s.x) + "px";
+        s.style.top = Math.round(s.y) + "px";
       } else {
         // Check if ship is WAY too far outside (truly lost ships only)
-        const dx = s.x - centerX;
-        const dy = s.y - centerY;
-        const distanceFromCenter = Math.sqrt(dx * dx + dy * dy);
-        
-        // Only reposition ships that are EXTREMELY far outside (lost ships)
-        if (distanceFromCenter > maxDistance) {
-          console.log(`[CIRCLE] Repositioning truly lost ship at distance ${distanceFromCenter.toFixed(1)} (max: ${maxDistance.toFixed(1)})`);
-          // Move ship to a random position within visible circle
-          const angle = Math.random() * 2 * Math.PI;
-          const r = Math.random() * (radius - 20);
-          s.x = centerX + Math.cos(angle) * r;
-          s.y = centerY + Math.sin(angle) * r;
-        }
+        s.style.left = Math.round(s.x) + "px";
+        s.style.top = Math.round(s.y) + "px";
       }
-      
-      s.style.left = Math.round(s.x) + "px";
-      s.style.top = Math.round(s.y) + "px";
     }
   } catch (e) { /* non-critical */ }
 }
