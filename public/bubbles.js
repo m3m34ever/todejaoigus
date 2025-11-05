@@ -1024,22 +1024,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // ensure muted to maximize autoplay chance
     try { bg.muted = true; } catch (e) { /* ignore */ }
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-
-    canvas.style.position = "fixed";
-    canvas.style.inset = "0";
-    canvas.style.width = "100vw";
-    canvas.style.height = "100dvh";
-    canvas.style.objectFit = "cover";
-    canvas.style.zIndex = "1";
-    canvas.style.display = "none";
-    canvas.style.pointerEvents = "none";
-
-    document.body.appendChild(canvas);
-
-    let isBlending = false;
-    let capturedFrame = null;
 
     // ADD this as an additional timeupdate listener (don't replace your existing one):
     bg.addEventListener("timeupdate", () => {
