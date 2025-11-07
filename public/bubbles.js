@@ -1475,7 +1475,7 @@ document.addEventListener("DOMContentLoaded", () => {
           if (this.switchInProgress || this.currentActive === 'secondary') return;
           
           this.switchInProgress = true;
-          console.log('[DUAL VIDEO] Textured dissolve to secondary');
+          console.log('[DUAL VIDEO] Wave motion transition to secondary');
           
           if (this.secondaryVideo.readyState < 2) {
             console.warn('[DUAL VIDEO] Secondary not ready, forcing load');
@@ -1486,38 +1486,45 @@ document.addEventListener("DOMContentLoaded", () => {
           this.secondaryVideo.currentTime = 0;
           this.secondaryVideo.play().then(() => {
             
-            // TEXTURED DISSOLVE - maintains visual complexity
-            this.secondaryVideo.style.mixBlendMode = 'overlay'; // Preserves texture
-            this.secondaryVideo.style.opacity = '0';
+            // MOTION-PRESERVING TRANSITION - secondary plays underneath
             
-            // Animate opacity while maintaining texture
+            // Step 1: Secondary starts playing at full opacity underneath
+            this.secondaryVideo.style.mixBlendMode = 'normal';
+            this.secondaryVideo.style.opacity = '1';
+            this.secondaryVideo.style.zIndex = '-2'; // Behind main video
+            
+            // Step 2: Main video stays on top but gradually becomes transparent
+            this.mainVideo.style.zIndex = '-1'; // On top of secondary
+            
+            // Step 3: Quick fade out of main video (secondary waves visible underneath)
             let progress = 0;
-            const steps = 10;
+            const steps = 6; // Fast transition to minimize any blending artifacts
             
-            const dissolveStep = () => {
+            const motionStep = () => {
               progress++;
               const ratio = progress / steps;
               
-              // Secondary fades in with texture blending
-              this.secondaryVideo.style.opacity = ratio.toString();
-              // Main fades out but stays textured
+              // Main video fades out, revealing secondary waves underneath
               this.mainVideo.style.opacity = (1 - ratio).toString();
+              // Secondary stays at full opacity, providing continuous wave motion
               
               if (progress < steps) {
-                requestAnimationFrame(dissolveStep);
+                requestAnimationFrame(motionStep);
               } else {
-                // Finalize transition
-                this.secondaryVideo.style.mixBlendMode = 'normal';
-                this.secondaryVideo.style.opacity = '1';
+                // Transition complete - secondary is now the main visible video
                 this.mainVideo.style.opacity = '0';
                 this.mainVideo.pause();
+                
+                // Reset z-indices for next transition
+                this.secondaryVideo.style.zIndex = this.mainVideo.style.zIndex || '-1';
+                
                 this.currentActive = 'secondary';
                 this.switchInProgress = false;
-                console.log('[DUAL VIDEO] Textured dissolve complete');
+                console.log('[DUAL VIDEO] Wave motion transition complete');
               }
             };
             
-            requestAnimationFrame(dissolveStep);
+            requestAnimationFrame(motionStep);
             
           }).catch(e => {
             console.error('[DUAL VIDEO] Failed to start secondary video:', e);
@@ -1530,44 +1537,51 @@ document.addEventListener("DOMContentLoaded", () => {
           if (this.switchInProgress || this.currentActive === 'main') return;
           
           this.switchInProgress = true;
-          console.log('[DUAL VIDEO] Textured dissolve to main');
+          console.log('[DUAL VIDEO] Wave motion transition to main');
           
           // Start main video from beginning
           this.mainVideo.currentTime = 0;
           this.mainVideo.play().then(() => {
             
-            // TEXTURED DISSOLVE
-            this.mainVideo.style.mixBlendMode = 'overlay'; // Preserves texture
-            this.mainVideo.style.opacity = '0';
+            // MOTION-PRESERVING TRANSITION - main plays underneath
             
-            // Animate opacity while maintaining texture
+            // Step 1: Main starts playing at full opacity underneath
+            this.mainVideo.style.mixBlendMode = 'normal';
+            this.mainVideo.style.opacity = '1';
+            this.mainVideo.style.zIndex = '-2'; // Behind secondary video
+            
+            // Step 2: Secondary video stays on top but gradually becomes transparent
+            this.secondaryVideo.style.zIndex = '-1'; // On top of main
+            
+            // Step 3: Quick fade out of secondary video (main waves visible underneath)
             let progress = 0;
-            const steps = 10;
+            const steps = 6; // Fast transition
             
-            const dissolveStep = () => {
+            const motionStep = () => {
               progress++;
               const ratio = progress / steps;
               
-              // Main fades in with texture blending
-              this.mainVideo.style.opacity = ratio.toString();
-              // Secondary fades out but stays textured
+              // Secondary video fades out, revealing main waves underneath
               this.secondaryVideo.style.opacity = (1 - ratio).toString();
+              // Main stays at full opacity, providing continuous wave motion
               
               if (progress < steps) {
-                requestAnimationFrame(dissolveStep);
+                requestAnimationFrame(motionStep);
               } else {
-                // Finalize transition
-                this.mainVideo.style.mixBlendMode = 'normal';
-                this.mainVideo.style.opacity = '1';
+                // Transition complete - main is now the main visible video
                 this.secondaryVideo.style.opacity = '0';
                 this.secondaryVideo.pause();
+                
+                // Reset z-indices for next transition
+                this.mainVideo.style.zIndex = this.secondaryVideo.style.zIndex || '-1';
+                
                 this.currentActive = 'main';
                 this.switchInProgress = false;
-                console.log('[DUAL VIDEO] Textured dissolve complete');
+                console.log('[DUAL VIDEO] Wave motion transition complete');
               }
             };
             
-            requestAnimationFrame(dissolveStep);
+            requestAnimationFrame(motionStep);
             
           }).catch(e => {
             console.error('[DUAL VIDEO] Failed to start main video:', e);
