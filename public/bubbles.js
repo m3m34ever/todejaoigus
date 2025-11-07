@@ -1148,6 +1148,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     // ==================== SAFARI-ONLY SECTION ====================
+    // because safari is broken and cannot handle video loops properly -_-
     if (isSafari) {
       console.log("[SAFARI] Applying ultra-simple blank screen fix");
       
@@ -1157,6 +1158,7 @@ document.addEventListener("DOMContentLoaded", () => {
       
       let safariResetInProgress = false;
       let lastResetTime = 0;
+      let resetCount = 0;
       
       // ONLY timeupdate handler for Safari - very simple
       const safariOnlyHandler = (e) => {
@@ -1164,27 +1166,27 @@ document.addEventListener("DOMContentLoaded", () => {
         
         const now = performance.now();
         const timeLeft = bg.duration - bg.currentTime;
+        const currentTime = bg.currentTime;
         
         // Reset VERY early to eliminate any gap
-        if (timeLeft <= 1.5 && (now - lastResetTime) > 300) { 
+        if (timeLeft <= 3.0 && (now - lastResetTime) > 200) { 
           safariResetInProgress = true;
           lastResetTime = now;
-          console.log("[SAFARI] Very aggressive early reset at", bg.currentTime.toFixed(3));
+          resetCount++;
+          console.log(`[SAFARI] Ultra-aggressive reset #${resetCount} at ${currentTime.toFixed(3)}s (${timeLeft.toFixed(3)}s remaining)`);
           
           // Immediate reset
-          bg.currentTime = 0.05;
+          bg.currentTime = 0;
           
+          // Ensure it keeps playing immediately
+          if (bg.paused) {
+            bg.play().catch(() => {});
+          }
           
-          // Short timeout to prevent multiple resets
+          // Very short reset window
           setTimeout(() => {
-            if (bg.currentTime < 0.5) {
-              bg.currentTime = 0;
-            }
-            if (bg.paused) {
-              bg.play().catch(() => {});
-            }
             safariResetInProgress = false;
-          }, 50);
+          }, 100);
         }
       };
       
@@ -1195,9 +1197,8 @@ document.addEventListener("DOMContentLoaded", () => {
       bg.addEventListener("ended", (e) => {
         if (!safariResetInProgress) {
           safariResetInProgress = true;
-
-          console.log("[SAFARI] Backup ended handler reset");
-
+          console.log("[SAFARI] Ended event - emergency reset");
+          
           bg.currentTime = 0;
           bg.play().then(() => {
             safariResetInProgress = false;
@@ -1209,31 +1210,57 @@ document.addEventListener("DOMContentLoaded", () => {
       
       // Prevent pauses during transitions
       bg.addEventListener("pause", (e) => {
-        if (bg.currentTime >= bg.duration - 2.0) {
-          console.log("[SAFARI] Preventing pause during early reset");
+        if (bg.currentTime >= bg.duration - 4.0) {
+          console.log("[SAFARI] Preventing pause during ultra-early reset period");
           e.preventDefault();
+          bg.currentTime = 0;
           bg.play().catch(() => {});
         }
       });
 
       bg.addEventListener("stalled", (e) => {
-        if (bg.currentTime >= bg.duration - 1.0) {
+        if (bg.currentTime >= bg.duration - 3.0) {
           console.log("[SAFARI] Stalled near end - forcing reset");
           bg.currentTime = 0;
           bg.play().catch(() => {});
         }
       });
+      bg.addEventListener("seeking", (e) => {
+      if (bg.currentTime >= bg.duration - 2.0) {
+        console.log("[SAFARI] Seeking near end - forcing reset");
+        bg.currentTime = 0;
+      }
+    });
 
       bg.addEventListener("loadeddata", () => {
-        if (bg.currentTime >= bg.duration - 0.1) {
+        if (bg.currentTime >= bg.duration - 0.5) {
           bg.currentTime = 0;
         }
         if (bg.paused) {
           bg.play().catch(() => {});
         }
-      });
+      });const safariMonitorInterval = setInterval(() => {
+        if (!bg || bg.paused || bg.ended) return;
+        
+        const timeLeft = bg.duration - bg.currentTime;
+        const now = performance.now();
+        
+        // Backup reset mechanism
+        if (timeLeft <= 2.5 && (now - lastResetTime) > 500 && !safariResetInProgress) {
+          console.log("[SAFARI] Backup monitor triggered reset at", bg.currentTime.toFixed(3));
+          safariResetInProgress = true;
+          lastResetTime = now;
+          
+          bg.currentTime = 0;
+          if (bg.paused) bg.play().catch(() => {});
+          
+          setTimeout(() => {
+            safariResetInProgress = false;
+          }, 100);
+        }
+      }, 100); // Check every 100ms
       
-      console.log("[SAFARI] AggressiveSafari-only handlers applied - skipping all other video logic");
+      console.log("[SAFARI] Ultra-aggressive Safari handlers applied - 3+ second early reset");
       
     } else {
       // ==================== NON-SAFARI SECTION ====================
