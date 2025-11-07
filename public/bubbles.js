@@ -1156,30 +1156,35 @@ document.addEventListener("DOMContentLoaded", () => {
       bg.removeAttribute("loop");
       
       let safariResetInProgress = false;
+      let lastResetTime = 0;
       
       // ONLY timeupdate handler for Safari - very simple
       const safariOnlyHandler = (e) => {
         if (safariResetInProgress || bg.duration <= 0) return;
         
+        const now = performance.now();
         const timeLeft = bg.duration - bg.currentTime;
         
         // Reset VERY early to eliminate any gap
-        if (timeLeft <= 0.8) {  // Reset with 0.8 seconds remaining
+        if (timeLeft <= 1.5 && (now - lastResetTime) > 300) { 
           safariResetInProgress = true;
-          console.log("[SAFARI] Ultra-early reset at", bg.currentTime.toFixed(3));
+          lastResetTime = now;
+          console.log("[SAFARI] Very aggressive early reset at", bg.currentTime.toFixed(3));
           
           // Immediate reset
-          bg.currentTime = 0;
+          bg.currentTime = 0.05;
           
-          // Ensure it keeps playing
-          if (bg.paused) {
-            bg.play().catch(() => {});
-          }
           
           // Short timeout to prevent multiple resets
           setTimeout(() => {
+            if (bg.currentTime < 0.5) {
+              bg.currentTime = 0;
+            }
+            if (bg.paused) {
+              bg.play().catch(() => {});
+            }
             safariResetInProgress = false;
-          }, 200);
+          }, 50);
         }
       };
       
@@ -1190,26 +1195,51 @@ document.addEventListener("DOMContentLoaded", () => {
       bg.addEventListener("ended", (e) => {
         if (!safariResetInProgress) {
           safariResetInProgress = true;
+
+          console.log("[SAFARI] Backup ended handler reset");
+
           bg.currentTime = 0;
-          bg.play().catch(() => {});
-          setTimeout(() => { safariResetInProgress = false; }, 200);
+          bg.play().then(() => {
+            safariResetInProgress = false;
+          }).catch(() => {
+            safariResetInProgress = false;
+          });
         }
       });
       
       // Prevent pauses during transitions
       bg.addEventListener("pause", (e) => {
-        if (bg.currentTime >= bg.duration - 1.0) {
+        if (bg.currentTime >= bg.duration - 2.0) {
           console.log("[SAFARI] Preventing pause during early reset");
           e.preventDefault();
           bg.play().catch(() => {});
         }
       });
+
+      bg.addEventListener("stalled", (e) => {
+        if (bg.currentTime >= bg.duration - 1.0) {
+          console.log("[SAFARI] Stalled near end - forcing reset");
+          bg.currentTime = 0;
+          bg.play().catch(() => {});
+        }
+      });
+
+      bg.addEventListener("loadeddata", () => {
+        if (bg.currentTime >= bg.duration - 0.1) {
+          bg.currentTime = 0;
+        }
+        if (bg.paused) {
+          bg.play().catch(() => {});
+        }
+      });
       
-      console.log("[SAFARI] Safari-only handlers applied - skipping all other video logic");
+      console.log("[SAFARI] AggressiveSafari-only handlers applied - skipping all other video logic");
       
     } else {
       // ==================== NON-SAFARI SECTION ====================
       console.log("[NON-SAFARI] Using advanced loop handling");
+
+      bg.loop = true
       
       // Enhanced metadata setup
       bg.addEventListener("loadedmetadata", () => {
@@ -1218,44 +1248,16 @@ document.addEventListener("DOMContentLoaded", () => {
           bg.poster = "";
           bg.preload = "auto";
           bg.loop = true;
-          
-          if (bg.duration > 0) {
-            bg.currentTime = 0.1;
-            setTimeout(() => {
-              bg.currentTime = 0;
-            }, 100);
-          }
         } catch (e) {
           console.error("[VIDEO] Metadata setup error:", e);
         }
       });
-
       // Enhanced seeking/seeked handlers
-      bg.addEventListener("seeking", (e) => {
-        console.log("[VIDEO] Seeking detected at", bg.currentTime);
-      });
-
-      bg.addEventListener("seeked", (e) => {
-        console.log("[VIDEO] Seek completed at", bg.currentTime);
-        if (!bg.paused) {
-          bg.play().catch(() => {});
-        }
-      });
-
-      // Prevent pause during loop transitions
-      bg.addEventListener("pause", (e) => {
-        if (bg.currentTime >= bg.duration - 0.2) {
-          console.log("[VIDEO] Prevented pause during loop transition");
-          e.preventDefault();
-          bg.play().catch(() => {});
-        }
-      });
-
-      // Motion blur effect - SINGLE implementation
       bg.addEventListener("timeupdate", () => {
         if (bg.duration > 0) {
           const timeRemaining = bg.duration - bg.currentTime;
           
+          // Pure visual effect - no currentTime manipulation
           if (timeRemaining <= 0.08 && timeRemaining > 0.02) {
             bg.style.transition = "filter 0.06s ease-out";
             bg.style.filter = "blur(0.8px) brightness(0.96) contrast(1.02)";
@@ -1269,76 +1271,23 @@ document.addEventListener("DOMContentLoaded", () => {
           }
         }
       });
-      
-      // Enhanced loop handling - SINGLE implementation
-      bg.addEventListener("timeupdate", () => {
-        if (bg.duration > 0) {
-          const timeRemaining = bg.duration - bg.currentTime;
-          
-          if (timeRemaining <= 0.05 && timeRemaining > 0.02) {
-            try {
-              if (bg.paused) {
-                bg.play().catch(() => {});
-              }
-              
-              const tempCurrentTime = bg.currentTime;
-              bg.currentTime = 0.01;
-              
-              setTimeout(() => {
-                if (bg.currentTime < 0.5) {
-                  bg.currentTime = tempCurrentTime;
-                }
-              }, 10);
-              
-            } catch (e) {
-              console.error("[VIDEO] Loop preparation error:", e);
-            }
-          }
-        }
-      });
-      
-      // Buffer optimization - SINGLE implementation
-      bg.addEventListener("timeupdate", () => {
-        if (bg.duration > 0 && bg.currentTime >= bg.duration - 1.0 && bg.currentTime < bg.duration - 0.8) {
-          try {
-            if (bg.buffered.length > 0 && bg.buffered.start(0) > 0.5) {
-              const tempTime = bg.currentTime;
-              bg.currentTime = 0.1;
-              setTimeout(() => { if (bg.currentTime < 1) bg.currentTime = tempTime; }, 50);
-            }
-          } catch (e) {}
-        }
-      });
 
-      // Additional handlers for non-Safari
+      // Simple backup handlers - minimal intervention
       bg.addEventListener("ended", () => {
-        if (!loopResetInProgress) {
+        if (!loopResetInProgress && bg.loop) {
           loopResetInProgress = true;
+          console.log("[NON-SAFARI] Simple ended handler reset");
           bg.currentTime = 0;
           bg.play().catch(() => {});
           setTimeout(() => { loopResetInProgress = false; }, 100);
         }
       });
 
-      bg.addEventListener("stalled", () => {
-        if (bg.readyState >= 2 && !bg.paused) {
-          setTimeout(() => {
-            if (!bg.paused && bg.currentTime === bg.duration) {
-              bg.currentTime = 0;
-              bg.play().catch(() => {});
-            }
-          }, 50);
-        }
-      });
-
-      // Enhanced loadstart for non-Safari
+      // Basic loadstart attributes
       bg.addEventListener("loadstart", () => {
         try {
           bg.preload = "auto";
-          bg.crossOrigin = "anonymous";
           bg.playsInline = true;
-          bg.setAttribute("webkit-playsinline", "true");
-          bg.setAttribute("x-webkit-airplay", "allow");
         } catch (e) {}
       });
     }
