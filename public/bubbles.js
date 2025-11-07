@@ -1150,117 +1150,146 @@ document.addEventListener("DOMContentLoaded", () => {
     // ==================== SAFARI-ONLY SECTION ====================
     // because safari is broken and cannot handle video loops properly -_-
     if (isSafari) {
-      console.log("[SAFARI] Applying ultra-simple blank screen fix");
-      
-      // Disable native loop completely
+      console.log("[SAFARI] Applying dual-video seamless loop solution");
+  
+      // Disable native loop completely on main video
       bg.loop = false;
       bg.removeAttribute("loop");
       
-      let safariResetInProgress = false;
-      let lastResetTime = 0;
-      let resetCount = 0;
+      // Create second video for seamless handoff
+      const bg2 = document.createElement("video");
+      bg2.id = "bgVideo2";
+      bg2.src = bg.src;
+      bg2.muted = true;
+      bg2.playsInline = true;
+      bg2.preload = "auto";
+      bg2.crossOrigin = "anonymous";
       
-      // ONLY timeupdate handler for Safari - very simple
-      const safariOnlyHandler = (e) => {
-        if (safariResetInProgress || bg.duration <= 0) return;
-        
-        const now = performance.now();
-        const timeLeft = bg.duration - bg.currentTime;
-        const currentTime = bg.currentTime;
-        
-        // Reset VERY early to eliminate any gap
-        if (timeLeft <= 3.0 && (now - lastResetTime) > 200) { 
-          safariResetInProgress = true;
-          lastResetTime = now;
-          resetCount++;
-          console.log(`[SAFARI] Ultra-aggressive reset #${resetCount} at ${currentTime.toFixed(3)}s (${timeLeft.toFixed(3)}s remaining)`);
-          
-          // Immediate reset
-          bg.currentTime = 0;
-          
-          // Ensure it keeps playing immediately
-          if (bg.paused) {
-            bg.play().catch(() => {});
-          }
-          
-          // Very short reset window
-          setTimeout(() => {
-            safariResetInProgress = false;
-          }, 100);
+      // Copy all styling from original video
+      bg2.style.cssText = bg.style.cssText;
+      bg2.style.opacity = "0"; // Start hidden
+      bg2.style.zIndex = parseInt(getComputedStyle(bg).zIndex || "0") - 1;
+      
+      // Insert second video right after the first
+      bg.parentNode.insertBefore(bg2, bg.nextSibling);
+      
+      let activeVideo = bg;
+      let standbyVideo = bg2;
+      let safariSwitchInProgress = false;
+      
+      // Preload both videos
+      const preloadBoth = async () => {
+        try {
+          await Promise.all([
+            bg.load(),
+            bg2.load()
+          ]);
+          console.log("[SAFARI] Both videos preloaded");
+        } catch (e) {
+          console.error("[SAFARI] Preload error:", e);
         }
       };
       
-      // Add only our Safari handler
-      bg.addEventListener("timeupdate", safariOnlyHandler);
+      preloadBoth();
       
-      // Simple backup for ended event
-      bg.addEventListener("ended", (e) => {
-        if (!safariResetInProgress) {
-          safariResetInProgress = true;
-          console.log("[SAFARI] Ended event - emergency reset");
-          
-          bg.currentTime = 0;
-          bg.play().then(() => {
-            safariResetInProgress = false;
-          }).catch(() => {
-            safariResetInProgress = false;
-          });
-        }
-      });
-      
-      // Prevent pauses during transitions
-      bg.addEventListener("pause", (e) => {
-        if (bg.currentTime >= bg.duration - 4.0) {
-          console.log("[SAFARI] Preventing pause during ultra-early reset period");
-          e.preventDefault();
-          bg.currentTime = 0;
-          bg.play().catch(() => {});
-        }
-      });
-
-      bg.addEventListener("stalled", (e) => {
-        if (bg.currentTime >= bg.duration - 3.0) {
-          console.log("[SAFARI] Stalled near end - forcing reset");
-          bg.currentTime = 0;
-          bg.play().catch(() => {});
-        }
-      });
-      bg.addEventListener("seeking", (e) => {
-      if (bg.currentTime >= bg.duration - 2.0) {
-        console.log("[SAFARI] Seeking near end - forcing reset");
-        bg.currentTime = 0;
-      }
-    });
-
-      bg.addEventListener("loadeddata", () => {
-        if (bg.currentTime >= bg.duration - 0.5) {
-          bg.currentTime = 0;
-        }
-        if (bg.paused) {
-          bg.play().catch(() => {});
-        }
-      });const safariMonitorInterval = setInterval(() => {
-        if (!bg || bg.paused || bg.ended) return;
+      // Seamless video switching function
+      const switchVideos = async () => {
+        if (safariSwitchInProgress) return;
+        safariSwitchInProgress = true;
         
-        const timeLeft = bg.duration - bg.currentTime;
-        const now = performance.now();
+        console.log("[SAFARI] Switching videos for seamless loop");
         
-        // Backup reset mechanism
-        if (timeLeft <= 2.5 && (now - lastResetTime) > 500 && !safariResetInProgress) {
-          console.log("[SAFARI] Backup monitor triggered reset at", bg.currentTime.toFixed(3));
-          safariResetInProgress = true;
-          lastResetTime = now;
+        try {
+          // Start standby video from beginning
+          standbyVideo.currentTime = 0;
+          await standbyVideo.play();
           
-          bg.currentTime = 0;
-          if (bg.paused) bg.play().catch(() => {});
+          // Quick crossfade
+          standbyVideo.style.opacity = "1";
+          activeVideo.style.opacity = "0";
           
+          // Small delay to ensure visual transition
           setTimeout(() => {
-            safariResetInProgress = false;
-          }, 100);
+            // Pause and reset the now-hidden video
+            activeVideo.pause();
+            activeVideo.currentTime = 0;
+            
+            // Swap references
+            const temp = activeVideo;
+            activeVideo = standbyVideo;
+            standbyVideo = temp;
+            
+            // Ensure standby is ready for next switch
+            standbyVideo.currentTime = 0;
+            
+            safariSwitchInProgress = false;
+          }, 50);
+          
+        } catch (e) {
+          console.error("[SAFARI] Video switch error:", e);
+          safariSwitchInProgress = false;
         }
-      }, 100); // Check every 100ms
+      };
       
-      console.log("[SAFARI] Ultra-aggressive Safari handlers applied - 3+ second early reset");
+      // Monitor active video and switch before it ends
+      const safariDualVideoHandler = () => {
+        if (safariSwitchInProgress || activeVideo.duration <= 0) return;
+        
+        const timeLeft = activeVideo.duration - activeVideo.currentTime;
+        
+        // Switch much earlier to avoid any gap (1 second early)
+        if (timeLeft <= 1.0 && timeLeft > 0.8) {
+          switchVideos();
+        }
+      };
+      
+      // Add timeupdate only to the active video initially
+      bg.addEventListener("timeupdate", safariDualVideoHandler);
+      
+      // Handle ended events as backup
+      const handleEnded = (video) => {
+        console.log("[SAFARI] Video ended - emergency switch");
+        if (!safariSwitchInProgress) {
+          switchVideos();
+        }
+      };
+      
+      bg.addEventListener("ended", () => handleEnded(bg));
+      bg2.addEventListener("ended", () => handleEnded(bg2));
+      
+      // Update timeupdate listener when videos switch
+      const originalSwitchVideos = switchVideos;
+      switchVideos = async () => {
+        await originalSwitchVideos();
+        
+        // Move timeupdate listener to new active video
+        bg.removeEventListener("timeupdate", safariDualVideoHandler);
+        bg2.removeEventListener("timeupdate", safariDualVideoHandler);
+        activeVideo.addEventListener("timeupdate", safariDualVideoHandler);
+      };
+      
+      // Handle video quality changes for both videos
+      const originalSetBgVideoVariant = window.setBgVideoVariant || setBgVideoVariant;
+      window.setBgVideoVariant = (idx, reason) => {
+        const newSrc = videoVariants[idx].src;
+        
+        // Update both videos
+        bg.src = newSrc;
+        bg2.src = newSrc;
+        
+        // Reload both
+        bg.load();
+        bg2.load();
+        
+        // Continue with original function logic
+        if (originalSetBgVideoVariant) {
+          originalSetBgVideoVariant(idx, reason);
+        }
+        
+        console.log(`[SAFARI] Updated both videos to ${newSrc}`);
+      };
+      
+      console.log("[SAFARI] Dual-video seamless loop system initialized");
       
     } else {
       // ==================== NON-SAFARI SECTION ====================
