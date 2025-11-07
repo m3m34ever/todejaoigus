@@ -1297,6 +1297,114 @@ document.addEventListener("DOMContentLoaded", () => {
     
     requestAnimationFrame(safariLoopMonitor);
   }
+
+  const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+  if (isSafari) {
+    console.log("[SAFARI] Applying improved buffering solution for seamless loops");
+    
+    let frameBuffer = null;
+    let isTransitioning = false;
+    let framesCaptured = false;
+    
+    function captureLoopFrames() {
+      if (bg.duration <= 0 || bg.readyState < 2 || framesCaptured) return;
+      
+      // Wait for video to be playing normally first
+      if (bg.currentTime < 1.0) return;
+      
+      try {
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+        canvas.width = bg.videoWidth || 1920;
+        canvas.height = bg.videoHeight || 1080;
+        
+        // Capture current frame (not end frame to avoid conflicts)
+        ctx.drawImage(bg, 0, 0);
+        frameBuffer = canvas.toDataURL();
+        framesCaptured = true;
+        
+        console.log("[SAFARI] Frame buffer created for seamless transitions");
+      } catch (e) {
+        console.error("[SAFARI] Frame capture failed:", e);
+      }
+    }
+    
+    function showBufferFrame() {
+      if (!frameBuffer || isTransitioning) return;
+      
+      isTransitioning = true;
+      console.log("[SAFARI] Using buffered frame for seamless transition");
+      
+      // Create overlay with captured frame
+      const overlay = document.createElement("canvas");
+      overlay.style.objectFit = "cover";
+      overlay.style.cssText = bg.style.cssText;
+      overlay.style.position = "fixed";
+      overlay.style.zIndex = "2";
+      overlay.style.pointerEvents = "none";
+      overlay.style.top = "0";
+      overlay.style.left = "0";
+      overlay.width = window.innerWidth * (window.devicePixelRatio || 1);
+      overlay.height = window.innerHeight * (window.devicePixelRatio || 1);
+      overlay.style.width = "100vw";
+      overlay.style.height = "100vh";
+      overlay.width = window.innerWidth * (window.devicePixelRatio || 1);
+overlay.height = window.innerHeight * (window.devicePixelRatio || 1);
+      
+      const overlayCtx = overlay.getContext("2d");
+      bg.parentNode.insertBefore(overlay, bg.nextSibling);
+      
+      // Draw buffered frame immediately
+      const img = new Image();
+      img.onload = () => {
+        overlayCtx.drawImage(img, 0, 0, overlay.width, overlay.height);
+        
+        // Quick video reset
+        bg.currentTime = 0;
+        
+        // Very short transition back to video
+        setTimeout(() => {
+          overlay.style.transition = "opacity 0.05s linear";
+          overlay.style.opacity = "0";
+          
+          setTimeout(() => {
+            overlay.remove();
+            isTransitioning = false;
+            framesCaptured = false; // Allow recapture for next loop
+          }, 60);
+        }, 30);
+      };
+      img.src = frameBuffer;
+    }
+    
+    // Capture frames after video has been playing for a bit
+    let captureTimer = null;
+    bg.addEventListener("playing", () => {
+      if (captureTimer) clearTimeout(captureTimer);
+      captureTimer = setTimeout(() => {
+        captureLoopFrames();
+      }, 2000); // Wait 2 seconds after playing starts
+    });
+    
+    // More precise trigger timing - very close to end
+    bg.addEventListener("timeupdate", () => {
+      if (bg.duration > 0) {
+        const timeRemaining = bg.duration - bg.currentTime;
+        
+        // Trigger at the last possible moment
+        if (timeRemaining <= 0.03 && timeRemaining > 0.01 && !isTransitioning && frameBuffer) {
+          showBufferFrame();
+        }
+      }
+    });
+    
+    // Backup trigger
+    bg.addEventListener("ended", () => {
+      if (!isTransitioning && frameBuffer) {
+        showBufferFrame();
+      }
+    });
+  }
   
   // Start Safari monitoring when video is playing
   bg.addEventListener("playing", () => {

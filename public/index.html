@@ -216,6 +216,21 @@ body {
   }
 }
 
+.feedback-note {
+  font-size: 0.7em;
+  color: rgba(255, 255, 255, 0.7);
+  font-style: italic;
+  margin-top: 2px;
+  margin-bottom: 4px;
+  font-family: 'CenturyExpanded', Arial, sans-serif;
+}
+
+@media (max-width: 520px) {
+  .feedback-note {
+    font-size: 0.65em;
+  }
+}
+
 #textInput {
   min-height: clamp(40px, 9vh, 150px);
   max-height: 30vh;
@@ -350,6 +365,8 @@ body.admin-mode {
     <input type="checkbox" id="feedbackCheckbox">
     <h1>kas soovid tagasisidet? meiliaadress nähtav ainult nõustajale</h1>
   </label>
+  <div class="feedback-note">*Nõustaja kiri võib sattuda rämpsposti hulka.</div>
+  <br>
   <br>
   <input type="email" id="emailInput" placeholder="sisesta oma email" style="display:none; margin-top:5px;">
   <br>
