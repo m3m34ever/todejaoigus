@@ -1087,32 +1087,6 @@ document.addEventListener("DOMContentLoaded", () => {
     // ensure muted to maximize autoplay chance
     try { bg.muted = true; } catch (e) { /* ignore */ }
 
-    // CREATE PLAY BUTTON (used by all browsers)
-    let btn = document.getElementById("bgPlayBtn");
-    if (!btn) {
-      btn = document.createElement("button");
-      btn.id = "bgPlayBtn";
-      btn.textContent = "Play background";
-      Object.assign(btn.style, {
-        display: "none",
-        position: "fixed",
-        right: "12px",
-        top: "12px",
-        zIndex: "10001",
-        background: "rgba(0,0,0,0.6)",
-        color: "#fff",
-        border: "none",
-        padding: "8px 12px",
-        borderRadius: "6px",
-        cursor: "pointer",
-        fontSize: "13px"
-      });
-      document.body.appendChild(btn);
-    }
-
-    const isPlaying = () => !!(bg && !bg.paused && !bg.ended && bg.readyState > 2);
-    const update = () => { btn.style.display = isPlaying() ? "none" : "block"; };
-
     const tryPlay = async () => {
       try {
         bg.muted = true;
