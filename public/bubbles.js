@@ -1015,60 +1015,155 @@ document.addEventListener("DOMContentLoaded", () => {
   window.addEventListener("resize", updateCheckboxScale);
   updateCheckboxScale();
 
-    (function setupBgPlayButton(){
-      const bg = document.getElementById("bgVideo");
-      if (!bg) return;
-      
-      // Set video source FIRST
-      if (!bg.src) bg.src = videoVariants[currentBgVariant].src;
-      const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+  (function setupBgPlayButton(){
+    const bg = document.getElementById("bgVideo");
+    if (!bg) return;
+    
+    // Set video source FIRST
+    if (!bg.src) bg.src = videoVariants[currentBgVariant].src;
+    
+    // Safari detection at the very top
+    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+    
+    // ensure muted to maximize autoplay chance
+    try { bg.muted = true; } catch (e) { /* ignore */ }
 
+    // CREATE PLAY BUTTON (used by all browsers)
+    let btn = document.getElementById("bgPlayBtn");
+    if (!btn) {
+      btn = document.createElement("button");
+      btn.id = "bgPlayBtn";
+      btn.textContent = "Play background";
+      Object.assign(btn.style, {
+        display: "none",
+        position: "fixed",
+        right: "12px",
+        top: "12px",
+        zIndex: "10001",
+        background: "rgba(0,0,0,0.6)",
+        color: "#fff",
+        border: "none",
+        padding: "8px 12px",
+        borderRadius: "6px",
+        cursor: "pointer",
+        fontSize: "13px"
+      });
+      document.body.appendChild(btn);
+    }
 
-      // ensure muted to maximize autoplay chance
-      try { bg.muted = true; } catch (e) { /* ignore */ }
+    const isPlaying = () => !!(bg && !bg.paused && !bg.ended && bg.readyState > 2);
+    const update = () => { btn.style.display = isPlaying() ? "none" : "block"; };
 
-      // ADD this as an additional timeupdate listener (don't replace your existing one):
-      if (!isSafari) {
-        bg.addEventListener("timeupdate", () => {
-          if (bg.duration > 0) {
-            const timeRemaining = bg.duration - bg.currentTime;
-            
-            // Apply subtle motion blur during the critical transition moment
-            if (timeRemaining <= 0.08 && timeRemaining > 0.02) {
-              // Create motion blur effect to mask the static frame
-              bg.style.transition = "filter 0.06s ease-out";
-              bg.style.filter = "blur(0.8px) brightness(0.96) contrast(1.02)";
-              
-              console.log("[MOTION BLUR] Masking loop transition");
-              
-              setTimeout(() => {
-                bg.style.filter = "none";
-                setTimeout(() => {
-                  bg.style.transition = "";
-                }, 70);
-              }, 60);
-            }
-          }
-        });
+    const tryPlay = async () => {
+      try {
+        bg.muted = true;
+        await bg.play();
+      } catch (err) {
+        // autoplay blocked — nothing to do, update will show button
+      } finally {
+        update();
       }
+    };
 
+    // keep visibility in sync with playback state
+    ["play","playing","pause","ended","loadeddata","canplay"].forEach(ev => bg.addEventListener(ev, update));
+
+    // initial attempt and UI update
+    update();
+    tryPlay();
+
+    // try again after first user gesture
+    const onFirstGesture = () => { tryPlay(); window.removeEventListener("pointerdown", onFirstGesture); window.removeEventListener("touchstart", onFirstGesture); };
+    window.addEventListener("pointerdown", onFirstGesture, { once: true });
+    window.addEventListener("touchstart", onFirstGesture, { once: true });
+
+    // button triggers a user-gesture play attempt
+    btn.addEventListener("click", async () => {
+      try {
+        await bg.play();
+      } catch (e) {
+        alert("Cannot play background due to browser restrictions.");
+      } finally {
+        update();
+      }
+    });
+
+    // ==================== SAFARI-ONLY SECTION ====================
+    if (isSafari) {
+      console.log("[SAFARI] Applying ultra-simple blank screen fix");
+      
+      // Disable native loop completely
+      bg.loop = false;
+      bg.removeAttribute("loop");
+      
+      let safariResetInProgress = false;
+      
+      // ONLY timeupdate handler for Safari - very simple
+      const safariOnlyHandler = (e) => {
+        if (safariResetInProgress || bg.duration <= 0) return;
+        
+        const timeLeft = bg.duration - bg.currentTime;
+        
+        // Reset VERY early to eliminate any gap
+        if (timeLeft <= 0.8) {  // Reset with 0.8 seconds remaining
+          safariResetInProgress = true;
+          console.log("[SAFARI] Ultra-early reset at", bg.currentTime.toFixed(3));
+          
+          // Immediate reset
+          bg.currentTime = 0;
+          
+          // Ensure it keeps playing
+          if (bg.paused) {
+            bg.play().catch(() => {});
+          }
+          
+          // Short timeout to prevent multiple resets
+          setTimeout(() => {
+            safariResetInProgress = false;
+          }, 200);
+        }
+      };
+      
+      // Add only our Safari handler
+      bg.addEventListener("timeupdate", safariOnlyHandler);
+      
+      // Simple backup for ended event
+      bg.addEventListener("ended", (e) => {
+        if (!safariResetInProgress) {
+          safariResetInProgress = true;
+          bg.currentTime = 0;
+          bg.play().catch(() => {});
+          setTimeout(() => { safariResetInProgress = false; }, 200);
+        }
+      });
+      
+      // Prevent pauses during transitions
+      bg.addEventListener("pause", (e) => {
+        if (bg.currentTime >= bg.duration - 1.0) {
+          console.log("[SAFARI] Preventing pause during early reset");
+          e.preventDefault();
+          bg.play().catch(() => {});
+        }
+      });
+      
+      console.log("[SAFARI] Safari-only handlers applied - skipping all other video logic");
+      
+    } else {
+      // ==================== NON-SAFARI SECTION ====================
+      console.log("[NON-SAFARI] Using advanced loop handling");
+      
+      // Enhanced metadata setup
       bg.addEventListener("loadedmetadata", () => {
         try {
-          // Ensure no poster frame is shown
           bg.removeAttribute("poster");
           bg.poster = "";
-          
-          // Force preload of entire video
           bg.preload = "auto";
-          
-          // Ensure seamless looping
           bg.loop = true;
           
-          // Set initial time to avoid showing first frame statically
           if (bg.duration > 0) {
-            bg.currentTime = 0.1; // Start slightly after beginning
+            bg.currentTime = 0.1;
             setTimeout(() => {
-              bg.currentTime = 0; // Reset to true beginning
+              bg.currentTime = 0;
             }, 100);
           }
         } catch (e) {
@@ -1076,20 +1171,19 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       });
 
-      // Force continuous playback during transitions
+      // Enhanced seeking/seeked handlers
       bg.addEventListener("seeking", (e) => {
         console.log("[VIDEO] Seeking detected at", bg.currentTime);
       });
 
       bg.addEventListener("seeked", (e) => {
         console.log("[VIDEO] Seek completed at", bg.currentTime);
-        // Ensure playback resumes immediately after seek
         if (!bg.paused) {
           bg.play().catch(() => {});
         }
       });
 
-      // Prevent any pause/static frames during loop
+      // Prevent pause during loop transitions
       bg.addEventListener("pause", (e) => {
         if (bg.currentTime >= bg.duration - 0.2) {
           console.log("[VIDEO] Prevented pause during loop transition");
@@ -1098,133 +1192,57 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       });
 
-      // Enhanced loop handling to prevent static frames
-      if (!isSafari) {
-        bg.addEventListener("timeupdate", () => {
-          if (bg.duration > 0) {
-            const timeRemaining = bg.duration - bg.currentTime;
+      // Motion blur effect - SINGLE implementation
+      bg.addEventListener("timeupdate", () => {
+        if (bg.duration > 0) {
+          const timeRemaining = bg.duration - bg.currentTime;
+          
+          if (timeRemaining <= 0.08 && timeRemaining > 0.02) {
+            bg.style.transition = "filter 0.06s ease-out";
+            bg.style.filter = "blur(0.8px) brightness(0.96) contrast(1.02)";
             
-            // Very close to end - prepare for seamless loop
-            if (timeRemaining <= 0.05 && timeRemaining > 0.02) {
-              try {
-                // Ensure video stays in playing state
-                if (bg.paused) {
-                  bg.play().catch(() => {});
-                }
-                
-                // Pre-seek to beginning to avoid static frame
-                const tempCurrentTime = bg.currentTime;
-                bg.currentTime = 0.01;
-                
-                // Immediately return to current position to continue playing
-                setTimeout(() => {
-                  if (bg.currentTime < 0.5) {
-                    bg.currentTime = tempCurrentTime;
-                  }
-                }, 10);
-                
-              } catch (e) {
-                console.error("[VIDEO] Loop preparation error:", e);
-              }
-            }
+            setTimeout(() => {
+              bg.style.filter = "none";
+              setTimeout(() => {
+                bg.style.transition = "";
+              }, 70);
+            }, 60);
           }
-        });
-      }
-      // prefer an existing button in HTML, otherwise create one
-      let btn = document.getElementById("bgPlayBtn");
-      if (!btn) {
-        btn = document.createElement("button");
-        btn.id = "bgPlayBtn";
-        btn.textContent = "Play background";
-        Object.assign(btn.style, {
-          display: "none",
-          position: "fixed",
-          right: "12px",
-          top: "12px",
-          zIndex: "10001",
-          background: "rgba(0,0,0,0.6)",
-          color: "#fff",
-          border: "none",
-          padding: "8px 12px",
-          borderRadius: "6px",
-          cursor: "pointer",
-          fontSize: "13px"
-        });
-        document.body.appendChild(btn);
-      }
-
-      const isPlaying = () => !!(bg && !bg.paused && !bg.ended && bg.readyState > 2);
-      const update = () => { btn.style.display = isPlaying() ? "none" : "block"; };
-
-      const tryPlay = async () => {
-        try {
-          bg.muted = true;
-          await bg.play();
-        } catch (err) {
-          // autoplay blocked — nothing to do, update will show button
-        } finally {
-          update();
-        }
-      };
-
-      // keep visibility in sync with playback state
-      ["play","playing","pause","ended","loadeddata","canplay"].forEach(ev => bg.addEventListener(ev, update));
-
-      // initial attempt and UI update
-      update();
-      tryPlay();
-
-      // try again after first user gesture (some browsers relax autoplay after gesture)
-      const onFirstGesture = () => { tryPlay(); window.removeEventListener("pointerdown", onFirstGesture); window.removeEventListener("touchstart", onFirstGesture); };
-      window.addEventListener("pointerdown", onFirstGesture, { once: true });
-      window.addEventListener("touchstart", onFirstGesture, { once: true });
-
-      // button triggers a user-gesture play attempt
-      btn.addEventListener("click", async () => {
-        try {
-          await bg.play();
-        } catch (e) {
-          alert("Cannot play background due to browser restrictions.");
-        } finally {
-          update();
         }
       });
-    if (!bg) return;
-
-    bg.addEventListener("loadstart", () => {
-      try {
-        bg.preload = "auto";
-        bg.crossOrigin = "anonymous";
-        bg.playsInline = true;
-        bg.setAttribute("webkit-playsinline", "true");
-        bg.setAttribute("x-webkit-airplay", "allow");
-      } catch (e) {}
-    });
-
-    // 2. Buffer optimization
-    bg.addEventListener("progress", () => {
-      try {
-        const buffered = bg.buffered;
-        if (buffered.length > 0) {
-          const bufferedEnd = buffered.end(buffered.length - 1);
-          const duration = bg.duration;
-          if (duration > 0 && bufferedEnd >= duration - 1) {
-            // Video is almost fully buffered - good for smooth looping
-            console.log("[SAFARI] Video buffer optimized for smooth looping");
+      
+      // Enhanced loop handling - SINGLE implementation
+      bg.addEventListener("timeupdate", () => {
+        if (bg.duration > 0) {
+          const timeRemaining = bg.duration - bg.currentTime;
+          
+          if (timeRemaining <= 0.05 && timeRemaining > 0.02) {
+            try {
+              if (bg.paused) {
+                bg.play().catch(() => {});
+              }
+              
+              const tempCurrentTime = bg.currentTime;
+              bg.currentTime = 0.01;
+              
+              setTimeout(() => {
+                if (bg.currentTime < 0.5) {
+                  bg.currentTime = tempCurrentTime;
+                }
+              }, 10);
+              
+            } catch (e) {
+              console.error("[VIDEO] Loop preparation error:", e);
+            }
           }
         }
-      } catch (e) {}
-    });
-
-    // Force seamless looping for Chrome/Safari
-    if (!isSafari) {
+      });
+      
+      // Buffer optimization - SINGLE implementation
       bg.addEventListener("timeupdate", () => {
-        // More aggressive reset for Chrome/Firefox - catch it earlier
         if (bg.duration > 0 && bg.currentTime >= bg.duration - 1.0 && bg.currentTime < bg.duration - 0.8) {
           try {
-            // Hint to browser to prepare for loop restart
             if (bg.buffered.length > 0 && bg.buffered.start(0) > 0.5) {
-              // Buffer doesn't include start - preload it
               const tempTime = bg.currentTime;
               bg.currentTime = 0.1;
               setTimeout(() => { if (bg.currentTime < 1) bg.currentTime = tempTime; }, 50);
@@ -1232,244 +1250,103 @@ document.addEventListener("DOMContentLoaded", () => {
           } catch (e) {}
         }
       });
-    }
 
-    // Additional Safari-specific loop handling
-    bg.addEventListener("ended", () => {
-      if (!loopResetInProgress) {
-        loopResetInProgress = true;
-        bg.currentTime = 0;
-        bg.play().catch(() => {});
-        setTimeout(() => { loopResetInProgress = false; }, 100);
-      }
-    });
-
-    // Safari sometimes fires 'stalled' during loop transitions
-    bg.addEventListener("stalled", () => {
-      if (bg.readyState >= 2 && !bg.paused) {
-        // Video has data but playback stalled - try to resume
-        setTimeout(() => {
-          if (!bg.paused && bg.currentTime === bg.duration) {
-            bg.currentTime = 0;
-            bg.play().catch(() => {});
-          }
-        }, 50);
-      }
-    });
-
-    // Ensure smooth playback settings for Safari
-    bg.addEventListener("loadeddata", () => {
-      try {
-        bg.playbackRate = 1.0;
-        // Safari-specific: ensure the video is ready for seamless looping
-        const preloadTime = Math.max(0, bg.duration - 2);
-        bg.currentTime = preloadTime;
-        
-        setTimeout(() => {
-          bg.currentTime = 0; // Reset to beginning
-          if (!bg.paused) bg.play().catch(() => {});
-        }, 200);
-      } catch (e) {}
-    });
-
-    // Safari sometimes benefits from manual loop detection
-    bg.addEventListener("loadedmetadata", () => {
-      // Ensure loop attribute is properly set for Safari
-      bg.loop = true;
-    });
-
-    if (isSafari) {
-      console.log("[SAFARI] Applying consolidated loop solution");
-      
-      // Remove native loop attribute - we handle it manually
-      bg.loop = false;
-      bg.removeAttribute("loop");
-      
-      let isHandlingLoop = false;
-      let lastValidTime = 0;
-      
-      // Single timeupdate handler for Safari
-      const safariTimeUpdateHandler = () => {
-        if (bg.duration <= 0 || isHandlingLoop) return;
-        
-        const currentTime = bg.currentTime;
-        const timeRemaining = bg.duration - currentTime;
-        
-        // Track valid playback time
-        if (currentTime > 0.1 && currentTime < bg.duration - 0.1) {
-          lastValidTime = currentTime;
-        }
-        
-        // Much earlier reset than other browsers - Safari needs this
-        if (timeRemaining <= 0.5 && !isHandlingLoop) {
-          isHandlingLoop = true;
-          console.log("[SAFARI] Early loop reset at", currentTime.toFixed(3));
-          
-          // Immediate reset - no delays or transitions
-          bg.currentTime = 0;
-          
-          // Ensure continuous playback
-          if (bg.paused) {
-            bg.play().catch(() => {});
-          }
-          
-          // Reset flag after brief delay
-          setTimeout(() => {
-            isHandlingLoop = false;
-          }, 100);
-        }
-      };
-      
-      // Add our single timeupdate handler
-      bg.addEventListener("timeupdate", safariTimeUpdateHandler);
-      
-      // Handle ended event as backup
+      // Additional handlers for non-Safari
       bg.addEventListener("ended", () => {
-        if (!isHandlingLoop) {
-          isHandlingLoop = true;
+        if (!loopResetInProgress) {
+          loopResetInProgress = true;
           bg.currentTime = 0;
-          bg.play().then(() => {
-            isHandlingLoop = false;
-          }).catch(() => {
-            isHandlingLoop = false;
-          });
-        }
-      });
-      
-      // Prevent any pauses during loop transitions
-      bg.addEventListener("pause", (e) => {
-        if (bg.currentTime >= bg.duration - 0.5 || bg.currentTime < 0.1) {
-          console.log("[SAFARI] Preventing pause during loop");
-          e.preventDefault();
           bg.play().catch(() => {});
+          setTimeout(() => { loopResetInProgress = false; }, 100);
         }
       });
-      
-      // Handle seeking events that might interrupt smooth playback
-      bg.addEventListener("seeking", (e) => {
-        if (isHandlingLoop) return;
-        
-        const seekTime = bg.currentTime;
-        if (seekTime >= bg.duration - 0.1) {
-          bg.currentTime = 0;
-        }
-      });
-      
-      // Force immediate playback on load
-      bg.addEventListener("loadeddata", () => {
-        bg.currentTime = 0.05; // Start slightly into video
-        setTimeout(() => {
-          bg.currentTime = 0; // Perfect start
-          if (bg.paused) bg.play().catch(() => {});
-        }, 50);
-      });
-    }
 
-    let lastTime = 0;
-    let frameCount = 0;
-
-    function safariLoopMonitor() {
-      if (bg && bg.duration > 0 && !bg.paused && !bg.ended) {
-      const currentTime = bg.currentTime;
-      frameCount++;
-      
-      // Multiple detection strategies for better coverage
-      const nearEnd = currentTime >= bg.duration - 0.1;
-      const timeStuck = Math.abs(currentTime - lastTime) < 0.005 && currentTime > bg.duration - 0.5;
-      const frameStuck = frameCount % 60 === 0 && currentTime > bg.duration - 0.3;
-      
-      // Trigger reset if any condition is met
-      if ((nearEnd || timeStuck || frameStuck) && !loopResetInProgress) {
-        console.log("[SAFARI] Enhanced loop reset triggered");
-        loopResetInProgress = true;
-        
-        // Smoother reset with easing (optional - test if it helps)
-        bg.currentTime = 0;
-            setTimeout(() => { loopResetInProgress = false; }, 150);
-        }
-        
-        lastTime = currentTime;
-      }
-      
-      requestAnimationFrame(safariLoopMonitor);
-    }
-    
-    // Start Safari monitoring when video is playing
-    bg.addEventListener("playing", () => {
-      if (!bg.dataset.safariMonitorStarted) {
-        bg.dataset.safariMonitorStarted = "true";
-        safariLoopMonitor();
-      }
-    });
-
-      setTimeout(() => {
-        if (typeof bg.getVideoPlaybackQuality === "function") {
-          console.log("[BG VIDEO] Will start quality monitor in 10 seconds...");
-          
-          // Wait 10 seconds before starting monitoring
+      bg.addEventListener("stalled", () => {
+        if (bg.readyState >= 2 && !bg.paused) {
           setTimeout(() => {
-            console.log("[BG VIDEO] Starting quality monitor...");
-            let lastTotal = 0;
-            let lastDropped = 0;
-            let monitorStarted = false;
-            let samples = [];
-            const minSamplesBeforeSwitch = 3; // At least 3 samples (30 seconds) before switching
+            if (!bg.paused && bg.currentTime === bg.duration) {
+              bg.currentTime = 0;
+              bg.play().catch(() => {});
+            }
+          }, 50);
+        }
+      });
+
+      // Enhanced loadstart for non-Safari
+      bg.addEventListener("loadstart", () => {
+        try {
+          bg.preload = "auto";
+          bg.crossOrigin = "anonymous";
+          bg.playsInline = true;
+          bg.setAttribute("webkit-playsinline", "true");
+          bg.setAttribute("x-webkit-airplay", "allow");
+        } catch (e) {}
+      });
+    }
+
+    // ==================== QUALITY MONITORING (ALL BROWSERS) ====================
+    setTimeout(() => {
+      if (typeof bg.getVideoPlaybackQuality === "function") {
+        console.log("[BG VIDEO] Will start quality monitor in 10 seconds...");
+        
+        setTimeout(() => {
+          console.log("[BG VIDEO] Starting quality monitor...");
+          let lastTotal = 0;
+          let lastDropped = 0;
+          let monitorStarted = false;
+          let samples = [];
+          const minSamplesBeforeSwitch = 3;
+          
+          const monitorInterval = setInterval(() => {
+            if (!bg || bg.paused || bg.ended) return;
+            if (!monitorStarted && bg.readyState >= 2) monitorStarted = true;
+            if (!monitorStarted) return;
             
-            const monitorInterval = setInterval(() => {
-              if (!bg || bg.paused || bg.ended) return;
-              if (!monitorStarted && bg.readyState >= 2) monitorStarted = true;
-              if (!monitorStarted) return;
+            try {
+              const q = bg.getVideoPlaybackQuality();
+              const total = q.totalVideoFrames || 0;
+              const dropped = q.droppedVideoFrames || 0;
+              const totalDelta = total - lastTotal;
+              const droppedDelta = dropped - lastDropped;
+              lastTotal = total; lastDropped = dropped;
               
-              try {
-                const q = bg.getVideoPlaybackQuality();
-                const total = q.totalVideoFrames || 0;
-                const dropped = q.droppedVideoFrames || 0;
-                const totalDelta = total - lastTotal;
-                const droppedDelta = dropped - lastDropped;
-                lastTotal = total; lastDropped = dropped;
+              if (totalDelta > 0) {
+                const fps = totalDelta / 3;
+                const dropRatio = droppedDelta / Math.max(1, totalDelta);
                 
-                if (totalDelta > 0) {
-                  const fps = totalDelta / 3;
-                  const dropRatio = droppedDelta / Math.max(1, totalDelta);
+                samples.push({ fps, dropRatio });
+                
+                console.log(`[BG VIDEO] FPS: ${fps.toFixed(1)}, Drop ratio: ${(dropRatio*100).toFixed(1)}%, Samples: ${samples.length}/${minSamplesBeforeSwitch}, Current: ${videoVariants[currentBgVariant].src}`);
+                
+                if (samples.length >= minSamplesBeforeSwitch) {
+                  const avgFps = samples.reduce((sum, s) => sum + s.fps, 0) / samples.length;
+                  const avgDropRatio = samples.reduce((sum, s) => sum + s.dropRatio, 0) / samples.length;
                   
-                  // Store sample for averaging
-                  samples.push({ fps, dropRatio });
+                  console.log(`[BG VIDEO] Average over ${samples.length} samples: FPS: ${avgFps.toFixed(1)}, Drop ratio: ${(avgDropRatio*100).toFixed(1)}%`);
                   
-                  console.log(`[BG VIDEO] FPS: ${fps.toFixed(1)}, Drop ratio: ${(dropRatio*100).toFixed(1)}%, Samples: ${samples.length}/${minSamplesBeforeSwitch}, Current: ${videoVariants[currentBgVariant].src}`);
+                  if ((avgFps < 17 || avgDropRatio > 0.24) && !switchedDueToChoppy && currentBgVariant < videoVariants.length - 1) {
+                    console.log(`[BG VIDEO] Performance issue detected based on averages - switching down`);
+                    switchedDueToChoppy = true;
+                    setBgVideoVariant(currentBgVariant + 1, "performance");
+                    samples = [];
+                  }
                   
-                  // Only consider switching after we have enough samples (at least 30 seconds of data)
-                  if (samples.length >= minSamplesBeforeSwitch) {
-                    // Calculate averages over the collected samples
-                    const avgFps = samples.reduce((sum, s) => sum + s.fps, 0) / samples.length;
-                    const avgDropRatio = samples.reduce((sum, s) => sum + s.dropRatio, 0) / samples.length;
-                    
-                    console.log(`[BG VIDEO] Average over ${samples.length} samples: FPS: ${avgFps.toFixed(1)}, Drop ratio: ${(avgDropRatio*100).toFixed(1)}%`);
-                    
-                    if ((avgFps < 17 || avgDropRatio > 0.24) && !switchedDueToChoppy && currentBgVariant < videoVariants.length - 1) {
-                      console.log(`[BG VIDEO] Performance issue detected based on averages - switching down`);
-                      switchedDueToChoppy = true;
-                      setBgVideoVariant(currentBgVariant + 1, "performance");
-                      // Reset samples after switching
-                      samples = [];
-                    }
-                    
-                    // Keep only the last 10 samples (sliding window of ~30 seconds)
-                    if (samples.length > 10) {
-                      samples = samples.slice(-10);
-                    }
+                  if (samples.length > 10) {
+                    samples = samples.slice(-10);
                   }
                 }
-              } catch (e) { 
-                console.error("[BG VIDEO] Quality monitoring error:", e);
               }
-            }, 3000); // Still check every 3 seconds
+            } catch (e) { 
+              console.error("[BG VIDEO] Quality monitoring error:", e);
+            }
+          }, 3000);
 
-          }, 5000); // Wait 5 seconds before starting monitoring
-        }
-      }, 1000); // delay to ensure bg is ready
+        }, 5000);
+      }
+    }, 1000);
 
-      window.__setBgVideoVariant = (i) => { setBgVideoVariant(i, "manual"); };
-    })();
+    window.__setBgVideoVariant = (i) => { setBgVideoVariant(i, "manual"); };
+  })();
 
   if (textInput) {
     const resizeInput = () => {
