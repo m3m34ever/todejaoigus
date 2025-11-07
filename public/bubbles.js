@@ -1202,26 +1202,22 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!bg || bg.readyState < 2) return;
         
         try {
-          console.log("[SAFARI] Generating wave-motion preserving fallback");
+          console.log("[SAFARI] Generating blurred intermediate fallback");
           
           const originalTime = bg.currentTime;
           const wasPlaying = !bg.paused;
           
-          // Capture frames at different wave phases to preserve motion
-          const wavePhases = [
-            { time: 0.1, name: 'start' },
-            { time: bg.duration * 0.2, name: 'early' },
-            { time: bg.duration * 0.4, name: 'mid-early' },
-            { time: bg.duration * 0.6, name: 'mid-late' },
-            { time: bg.duration * 0.8, name: 'late' },
-            { time: Math.max(0, bg.duration - 0.3), name: 'end' }
+          // Capture just 3 strategic frames for blending
+          const frameTimes = [
+            0.1,                                    // Start frame
+            bg.duration * 0.5,                     // Middle frame  
+            Math.max(0, bg.duration - 0.3)        // End frame
           ];
           
           const frames = [];
           
-          // Capture all wave phase frames
-          for (const phase of wavePhases) {
-            bg.currentTime = phase.time;
+          for (const time of frameTimes) {
+            bg.currentTime = time;
             
             await new Promise(resolve => {
               const onSeeked = () => {
@@ -1238,106 +1234,81 @@ document.addEventListener("DOMContentLoaded", () => {
             const tempCtx = tempCanvas.getContext("2d");
             tempCtx.drawImage(bg, 0, 0);
             
-            frames.push({
-              data: tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height),
-              phase: phase.name,
-              time: phase.time
-            });
-            
+            frames.push(tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height));
             tempCanvas.remove();
-            console.log(`[SAFARI] Captured ${phase.name} wave phase at ${phase.time.toFixed(2)}s`);
+            
+            console.log(`[SAFARI] Captured frame at ${time.toFixed(2)}s`);
           }
           
-          // Create wave-preserving composite
+          // Create blurred intermediate blend
           const ctx = staticCanvas.getContext("2d");
           const width = bg.videoWidth;
           const height = bg.videoHeight;
-          const finalData = ctx.createImageData(width, height);
-          const finalPixels = finalData.data;
+          const blendedData = ctx.createImageData(width, height);
+          const blendedPixels = blendedData.data;
           
-          // Instead of averaging, use spatial wave analysis
-          for (let y = 0; y < height; y++) {
-            for (let x = 0; x < width; x++) {
-              const pixelIndex = (y * width + x) * 4;
+          // Simple averaging with gaussian-style weighting
+          for (let i = 0; i < blendedPixels.length; i += 4) {
+            // Weight frames: start=30%, middle=40%, end=30%
+            const r0 = frames[0].data[i];
+            const g0 = frames[0].data[i + 1];
+            const b0 = frames[0].data[i + 2];
+            const a0 = frames[0].data[i + 3];
+            
+            const r1 = frames[1].data[i];
+            const g1 = frames[1].data[i + 1];
+            const b1 = frames[1].data[i + 2];
+            const a1 = frames[1].data[i + 3];
+            
+            const r2 = frames[2].data[i];
+            const g2 = frames[2].data[i + 1];
+            const b2 = frames[2].data[i + 2];
+            const a2 = frames[2].data[i + 3];
+            
+            // Weighted average (emphasizes middle frame for natural look)
+            blendedPixels[i] = Math.round(r0 * 0.3 + r1 * 0.4 + r2 * 0.3);
+            blendedPixels[i + 1] = Math.round(g0 * 0.3 + g1 * 0.4 + g2 * 0.3);
+            blendedPixels[i + 2] = Math.round(b0 * 0.3 + b1 * 0.4 + b2 * 0.3);
+            blendedPixels[i + 3] = Math.round(a0 * 0.3 + a1 * 0.4 + a2 * 0.3);
+          }
+          
+          // Apply subtle blur for smoother transitions
+          const blurRadius = 1; // Small blur for natural softening
+          const tempImageData = ctx.createImageData(width, height);
+          tempImageData.data.set(blendedPixels);
+          
+          // Simple box blur
+          for (let y = blurRadius; y < height - blurRadius; y++) {
+            for (let x = blurRadius; x < width - blurRadius; x++) {
+              const centerIdx = (y * width + x) * 4;
               
-              // Calculate wave characteristics for this pixel position
-              const normalizedY = y / height;
-              const normalizedX = x / width;
+              let totalR = 0, totalG = 0, totalB = 0, totalA = 0;
+              let count = 0;
               
-              // Simulate wave motion patterns
-              const horizontalWave = Math.sin(normalizedX * Math.PI * 3) * 0.5 + 0.5;
-              const verticalWave = Math.sin(normalizedY * Math.PI * 2) * 0.5 + 0.5;
-              const diagonalWave = Math.sin((normalizedX + normalizedY) * Math.PI * 2) * 0.5 + 0.5;
-              
-              // Combine wave influences
-              const waveIntensity = (horizontalWave + verticalWave + diagonalWave) / 3;
-              
-              // Choose frame based on wave characteristics at this position
-              let selectedFrameIndex;
-              if (waveIntensity > 0.8) {
-                // High intensity area - use peak frames
-                selectedFrameIndex = Math.random() > 0.5 ? 0 : 5; // start or end
-              } else if (waveIntensity > 0.6) {
-                // Medium-high intensity - use mid-range frames
-                selectedFrameIndex = Math.random() > 0.5 ? 1 : 4; // early or late
-              } else if (waveIntensity > 0.4) {
-                // Medium intensity - use middle frames
-                selectedFrameIndex = Math.random() > 0.5 ? 2 : 3; // mid-early or mid-late
-              } else {
-                // Low intensity - blend between adjacent frames
-                const frame1 = frames[2];
-                const frame2 = frames[3];
-                const blendRatio = Math.random();
-                
-                const r1 = frame1.data.data[pixelIndex];
-                const g1 = frame1.data.data[pixelIndex + 1];
-                const b1 = frame1.data.data[pixelIndex + 2];
-                const a1 = frame1.data.data[pixelIndex + 3];
-                
-                const r2 = frame2.data.data[pixelIndex];
-                const g2 = frame2.data.data[pixelIndex + 1];
-                const b2 = frame2.data.data[pixelIndex + 2];
-                const a2 = frame2.data.data[pixelIndex + 3];
-                
-                finalPixels[pixelIndex] = Math.round(r1 * (1 - blendRatio) + r2 * blendRatio);
-                finalPixels[pixelIndex + 1] = Math.round(g1 * (1 - blendRatio) + g2 * blendRatio);
-                finalPixels[pixelIndex + 2] = Math.round(b1 * (1 - blendRatio) + b2 * blendRatio);
-                finalPixels[pixelIndex + 3] = Math.round(a1 * (1 - blendRatio) + a2 * blendRatio);
-                continue;
+              // Sample surrounding pixels for blur
+              for (let dy = -blurRadius; dy <= blurRadius; dy++) {
+                for (let dx = -blurRadius; dx <= blurRadius; dx++) {
+                  const sampleIdx = ((y + dy) * width + (x + dx)) * 4;
+                  totalR += tempImageData.data[sampleIdx];
+                  totalG += tempImageData.data[sampleIdx + 1];
+                  totalB += tempImageData.data[sampleIdx + 2];
+                  totalA += tempImageData.data[sampleIdx + 3];
+                  count++;
+                }
               }
               
-              // Use selected frame directly (preserves texture)
-              const selectedFrame = frames[selectedFrameIndex];
-              finalPixels[pixelIndex] = selectedFrame.data.data[pixelIndex];
-              finalPixels[pixelIndex + 1] = selectedFrame.data.data[pixelIndex + 1];
-              finalPixels[pixelIndex + 2] = selectedFrame.data.data[pixelIndex + 2];
-              finalPixels[pixelIndex + 3] = selectedFrame.data.data[pixelIndex + 3];
+              blendedPixels[centerIdx] = Math.round(totalR / count);
+              blendedPixels[centerIdx + 1] = Math.round(totalG / count);
+              blendedPixels[centerIdx + 2] = Math.round(totalB / count);
+              blendedPixels[centerIdx + 3] = Math.round(totalA / count);
             }
           }
           
-          // Apply subtle texture enhancement
-          for (let i = 0; i < finalPixels.length; i += 4) {
-            // Enhance contrast slightly to maintain texture definition
-            const r = finalPixels[i];
-            const g = finalPixels[i + 1];
-            const b = finalPixels[i + 2];
-            
-            // Calculate luminance
-            const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
-            
-            // Enhance contrast based on luminance
-            const contrast = luminance > 128 ? 1.1 : 0.95;
-            
-            finalPixels[i] = Math.min(255, Math.max(0, Math.round(r * contrast)));
-            finalPixels[i + 1] = Math.min(255, Math.max(0, Math.round(g * contrast)));
-            finalPixels[i + 2] = Math.min(255, Math.max(0, Math.round(b * contrast)));
-          }
-          
-          ctx.putImageData(finalData, 0, 0);
+          ctx.putImageData(blendedData, 0, 0);
           
           // Update cache
           fallbackCache.set(bg.src, {
-            imageData: finalData,
+            imageData: blendedData,
             width: staticCanvas.width,
             height: staticCanvas.height
           });
@@ -1348,10 +1319,10 @@ document.addEventListener("DOMContentLoaded", () => {
             bg.play().catch(() => {});
           }
           
-          console.log("[SAFARI] Wave-motion preserving fallback complete");
+          console.log("[SAFARI] Blurred intermediate fallback complete");
           
         } catch (e) {
-          console.error("[SAFARI] Wave-motion preserving fallback failed:", e);
+          console.error("[SAFARI] Blurred fallback failed:", e);
         }
       };
       
