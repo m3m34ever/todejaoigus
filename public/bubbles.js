@@ -1150,12 +1150,12 @@ document.addEventListener("DOMContentLoaded", () => {
     // ==================== SAFARI-ONLY SECTION ====================
     // because safari is broken and cannot handle video loops properly -_-
     if (isSafari) {
-      console.log("[SAFARI] Using cached generated fallback");
+      console.log("[SAFARI] Using always-ready cached fallback");
 
       bg.loop = false;
       bg.removeAttribute("loop");
       
-      // Create canvas for cached fallback
+      // Create canvas that's ALWAYS visible as background layer
       const staticCanvas = document.createElement("canvas");
       staticCanvas.id = "safariStaticFallback";
       staticCanvas.style.position = "fixed";
@@ -1165,38 +1165,78 @@ document.addEventListener("DOMContentLoaded", () => {
       staticCanvas.style.height = "100vh";
       staticCanvas.style.objectFit = "cover";
       staticCanvas.style.zIndex = parseInt(getComputedStyle(bg).zIndex || "-1") - 1;
-      staticCanvas.style.display = "none";
+      staticCanvas.style.display = "block"; // ALWAYS visible
+      
+      // Set initial background color to match your CSS
+      const ctx = staticCanvas.getContext("2d");
+      staticCanvas.width = window.innerWidth;
+      staticCanvas.height = window.innerHeight;
+      ctx.fillStyle =   "#313c34";
+      ctx.fillRect(0, 0, staticCanvas.width, staticCanvas.height);
       
       bg.parentNode.insertBefore(staticCanvas, bg);
       
       let safariResetInProgress = false;
-      let fallbackCache = new Map(); // Cache by video src - with proper structure
+      let fallbackCache = new Map();
+      let fallbackReady = false;
       
-      // Generate fallback once per video and cache forever
-      const getOrCreateFallback = async (videoSrc) => {
-        // Check cache first
-        if (fallbackCache.has(videoSrc)) {
-          const cached = fallbackCache.get(videoSrc);
-          staticCanvas.width = cached.width;
-          staticCanvas.height = cached.height;
-          const ctx = staticCanvas.getContext("2d");
-          ctx.putImageData(cached.imageData, 0, 0);
-          console.log("[SAFARI] Using cached fallback for", videoSrc);
-          return true;
-        }
+      // IMMEDIATE fallback generation - no waiting
+      const generateFallbackImmediately = () => {
+        console.log("[SAFARI] Starting immediate fallback generation");
         
-        // Generate new fallback
-        try {
-          console.log("[SAFARI] Generating new fallback for", videoSrc);
+        // Try every 500ms until we succeed
+        const attemptGeneration = async () => {
+          if (fallbackReady) return;
           
-          // Wait for video to be properly loaded
-          if (bg.readyState < 2 || bg.videoWidth === 0) {
-            console.log("[SAFARI] Video not ready, waiting...");
-            return false;
+          try {
+            if (bg.readyState < 2 || bg.videoWidth === 0) {
+              console.log("[SAFARI] Video not ready yet, retrying in 500ms...");
+              setTimeout(attemptGeneration, 500);
+              return;
+            }
+            
+            console.log("[SAFARI] Video ready, generating fallback now");
+            
+            // Set canvas to match video dimensions
+            staticCanvas.width = bg.videoWidth;
+            staticCanvas.height = bg.videoHeight;
+            
+            const originalTime = bg.currentTime;
+            const wasPlaying = !bg.paused;
+            
+            // Simple approach: just capture current frame (likely first frame)
+            const ctx = staticCanvas.getContext("2d");
+            ctx.drawImage(bg, 0, 0);
+            
+            // Store in cache
+            const imageData = ctx.getImageData(0, 0, staticCanvas.width, staticCanvas.height);
+            fallbackCache.set(bg.src, {
+              imageData: imageData,
+              width: staticCanvas.width,
+              height: staticCanvas.height
+            });
+            
+            fallbackReady = true;
+            console.log("[SAFARI] Simple fallback generated and cached");
+            
+            // Now try the enhanced version with blending
+            setTimeout(generateEnhancedFallback, 1000);
+            
+          } catch (e) {
+            console.error("[SAFARI] Immediate fallback failed:", e);
+            setTimeout(attemptGeneration, 1000);
           }
-          
-          staticCanvas.width = bg.videoWidth;
-          staticCanvas.height = bg.videoHeight;
+        };
+        
+        attemptGeneration();
+      };
+      
+      // Enhanced fallback with first+last frame blending
+      const generateEnhancedFallback = async () => {
+        if (!bg || bg.readyState < 2) return;
+        
+        try {
+          console.log("[SAFARI] Generating enhanced blended fallback");
           
           const originalTime = bg.currentTime;
           const wasPlaying = !bg.paused;
@@ -1218,7 +1258,7 @@ document.addEventListener("DOMContentLoaded", () => {
           const tempCtx = tempCanvas.getContext("2d");
           
           tempCtx.drawImage(bg, 0, 0);
-          const firstFrameData = tempCtx.getImageData(0, 0, staticCanvas.width, staticCanvas.height);
+          const firstFrameData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
           
           // Capture last frame
           bg.currentTime = Math.max(0, bg.duration - 0.5);
@@ -1232,11 +1272,11 @@ document.addEventListener("DOMContentLoaded", () => {
           });
           
           tempCtx.drawImage(bg, 0, 0);
-          const lastFrameData = tempCtx.getImageData(0, 0, staticCanvas.width, staticCanvas.height);
+          const lastFrameData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
           
           // Blend frames
           const ctx = staticCanvas.getContext("2d");
-          const blendedData = ctx.createImageData(staticCanvas.width, staticCanvas.height);
+          const blendedData = ctx.createImageData(tempCanvas.width, tempCanvas.height);
           const firstPixels = firstFrameData.data;
           const lastPixels = lastFrameData.data;
           const blendedPixels = blendedData.data;
@@ -1250,8 +1290,8 @@ document.addEventListener("DOMContentLoaded", () => {
           
           ctx.putImageData(blendedData, 0, 0);
           
-          // Cache with proper structure - FIXED
-          fallbackCache.set(videoSrc, {
+          // Update cache with enhanced version
+          fallbackCache.set(bg.src, {
             imageData: blendedData,
             width: staticCanvas.width,
             height: staticCanvas.height
@@ -1263,17 +1303,22 @@ document.addEventListener("DOMContentLoaded", () => {
             bg.play().catch(() => {});
           }
           
-          console.log("[SAFARI] Generated and cached fallback for", videoSrc);
+          console.log("[SAFARI] Enhanced blended fallback complete");
           tempCanvas.remove();
-          return true;
           
         } catch (e) {
-          console.error("[SAFARI] Fallback generation failed:", e);
-          return false;
+          console.error("[SAFARI] Enhanced fallback failed:", e);
         }
       };
       
-      // Simple reset handler using cached fallback
+      // Start generation immediately
+      generateFallbackImmediately();
+      
+      // Also trigger on video events
+      bg.addEventListener("loadeddata", generateFallbackImmediately);
+      bg.addEventListener("canplay", generateFallbackImmediately);
+      
+      // Safari reset handler - video switches between canvas and video
       const safariResetHandler = () => {
         if (safariResetInProgress || bg.duration <= 0) return;
         
@@ -1281,23 +1326,15 @@ document.addEventListener("DOMContentLoaded", () => {
         
         if (timeLeft <= 1.0) {
           safariResetInProgress = true;
-          console.log("[SAFARI] Reset triggered - showing cached fallback");
+          console.log("[SAFARI] Reset triggered - video opacity to 0");
           
-          // ALWAYS show cached fallback instantly (even if not perfect)
-          if (fallbackCache.has(bg.src)) {
-            staticCanvas.style.display = "block";
-            bg.style.opacity = "0";
-            console.log("[SAFARI] Fallback displayed, video hidden");
-          } else {
-            console.error("[SAFARI] No cached fallback available for", bg.src);
-          }
-          
+          // Just hide video - canvas is always visible underneath
+          bg.style.opacity = "0";
           bg.currentTime = 0;
           
           setTimeout(() => {
-            staticCanvas.style.display = "none";
             bg.style.opacity = "1";
-            console.log("[SAFARI] Video restored, fallback hidden");
+            console.log("[SAFARI] Video restored - opacity to 1");
             
             if (bg.paused) {
               bg.play().catch(() => {});
@@ -1308,26 +1345,9 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       };
       
-      // Generate fallback when video loads - WITH RETRY
-      const tryGenerateFallback = async () => {
-        const success = await getOrCreateFallback(bg.src);
-        if (!success) {
-          console.log("[SAFARI] Fallback generation failed, retrying in 1 second...");
-          setTimeout(tryGenerateFallback, 1000);
-        }
-      };
-      
-      bg.addEventListener("loadeddata", tryGenerateFallback);
-      bg.addEventListener("canplay", () => {
-        // Backup attempt if loadeddata failed
-        if (!fallbackCache.has(bg.src)) {
-          tryGenerateFallback();
-        }
-      });
-      
       bg.addEventListener("timeupdate", safariResetHandler);
       
-      // Handle video quality changes properly
+      // Handle video quality changes
       const originalSetBgVideoVariant = window.setBgVideoVariant || setBgVideoVariant;
       window.setBgVideoVariant = (idx, reason) => {
         const newSrc = videoVariants[idx].src;
@@ -1336,17 +1356,18 @@ document.addEventListener("DOMContentLoaded", () => {
         bg.src = newSrc;
         bg.load();
         
-        // Check if we already have this cached
+        // Check if we have this cached, otherwise regenerate
         if (fallbackCache.has(newSrc)) {
           const cached = fallbackCache.get(newSrc);
           staticCanvas.width = cached.width;
           staticCanvas.height = cached.height;
           const ctx = staticCanvas.getContext("2d");
           ctx.putImageData(cached.imageData, 0, 0);
-          console.log("[SAFARI] Immediately applied cached fallback for", newSrc);
+          console.log("[SAFARI] Applied cached fallback for", newSrc);
         } else {
-          // Generate when new video loads
-          bg.addEventListener("loadeddata", () => getOrCreateFallback(newSrc), { once: true });
+          // Generate for new video
+          fallbackReady = false;
+          bg.addEventListener("loadeddata", generateFallbackImmediately, { once: true });
         }
         
         // Continue with original function
@@ -1357,7 +1378,7 @@ document.addEventListener("DOMContentLoaded", () => {
         console.log(`[SAFARI] Updated video to ${newSrc}`);
       };
       
-      console.log("[SAFARI] Cached fallback system initialized");
+      console.log("[SAFARI] Always-ready fallback initialized - canvas always visible");
       
     } else {
       // ==================== NON-SAFARI SECTION ====================
