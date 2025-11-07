@@ -1475,7 +1475,7 @@ document.addEventListener("DOMContentLoaded", () => {
           if (this.switchInProgress || this.currentActive === 'secondary') return;
           
           this.switchInProgress = true;
-          console.log('[DUAL VIDEO] Averaging blend switch to secondary');
+          console.log('[DUAL VIDEO] Textured dissolve to secondary');
           
           if (this.secondaryVideo.readyState < 2) {
             console.warn('[DUAL VIDEO] Secondary not ready, forcing load');
@@ -1486,37 +1486,38 @@ document.addEventListener("DOMContentLoaded", () => {
           this.secondaryVideo.currentTime = 0;
           this.secondaryVideo.play().then(() => {
             
-            // AVERAGING BLEND APPROACH - maintains brightness
+            // TEXTURED DISSOLVE - maintains visual complexity
+            this.secondaryVideo.style.mixBlendMode = 'overlay'; // Preserves texture
+            this.secondaryVideo.style.opacity = '0';
             
-            // Step 1: Show secondary at 50% opacity (creates 50/50 average with main)
-            this.secondaryVideo.style.mixBlendMode = 'normal';
-            this.secondaryVideo.style.opacity = '0.5';
+            // Animate opacity while maintaining texture
+            let progress = 0;
+            const steps = 10;
             
-            // Step 2: Reduce main video opacity to create proper averaging
-            setTimeout(() => {
-              this.mainVideo.style.opacity = '0.5';
+            const dissolveStep = () => {
+              progress++;
+              const ratio = progress / steps;
               
-              // Brief averaging period - both videos at 50% = proper average
-              setTimeout(() => {
-                // Step 3: Gradually shift the balance
-                this.secondaryVideo.style.opacity = '0.75';
-                this.mainVideo.style.opacity = '0.25';
-                
-                setTimeout(() => {
-                  // Step 4: Complete the transition
-                  this.secondaryVideo.style.opacity = '1';
-                  this.mainVideo.style.opacity = '0';
-                  
-                  setTimeout(() => {
-                    this.mainVideo.pause();
-                    this.currentActive = 'secondary';
-                    this.switchInProgress = false;
-                    console.log('[DUAL VIDEO] Averaging blend transition complete');
-                  }, 50);
-                  
-                }, 50); // Gradual shift
-              }, 100); // Averaging period
-            }, 50); // Initial delay
+              // Secondary fades in with texture blending
+              this.secondaryVideo.style.opacity = ratio.toString();
+              // Main fades out but stays textured
+              this.mainVideo.style.opacity = (1 - ratio).toString();
+              
+              if (progress < steps) {
+                requestAnimationFrame(dissolveStep);
+              } else {
+                // Finalize transition
+                this.secondaryVideo.style.mixBlendMode = 'normal';
+                this.secondaryVideo.style.opacity = '1';
+                this.mainVideo.style.opacity = '0';
+                this.mainVideo.pause();
+                this.currentActive = 'secondary';
+                this.switchInProgress = false;
+                console.log('[DUAL VIDEO] Textured dissolve complete');
+              }
+            };
+            
+            requestAnimationFrame(dissolveStep);
             
           }).catch(e => {
             console.error('[DUAL VIDEO] Failed to start secondary video:', e);
@@ -1529,43 +1530,44 @@ document.addEventListener("DOMContentLoaded", () => {
           if (this.switchInProgress || this.currentActive === 'main') return;
           
           this.switchInProgress = true;
-          console.log('[DUAL VIDEO] Averaging blend switch to main');
+          console.log('[DUAL VIDEO] Textured dissolve to main');
           
           // Start main video from beginning
           this.mainVideo.currentTime = 0;
           this.mainVideo.play().then(() => {
             
-            // AVERAGING BLEND APPROACH - maintains brightness
+            // TEXTURED DISSOLVE
+            this.mainVideo.style.mixBlendMode = 'overlay'; // Preserves texture
+            this.mainVideo.style.opacity = '0';
             
-            // Step 1: Show main at 50% opacity (creates 50/50 average with secondary)
-            this.mainVideo.style.mixBlendMode = 'normal';
-            this.mainVideo.style.opacity = '0.5';
+            // Animate opacity while maintaining texture
+            let progress = 0;
+            const steps = 10;
             
-            // Step 2: Reduce secondary opacity to create proper averaging
-            setTimeout(() => {
-              this.secondaryVideo.style.opacity = '0.5';
+            const dissolveStep = () => {
+              progress++;
+              const ratio = progress / steps;
               
-              // Brief averaging period - both videos at 50% = proper average
-              setTimeout(() => {
-                // Step 3: Gradually shift the balance
-                this.mainVideo.style.opacity = '0.75';
-                this.secondaryVideo.style.opacity = '0.25';
-                
-                setTimeout(() => {
-                  // Step 4: Complete the transition
-                  this.mainVideo.style.opacity = '1';
-                  this.secondaryVideo.style.opacity = '0';
-                  
-                  setTimeout(() => {
-                    this.secondaryVideo.pause();
-                    this.currentActive = 'main';
-                    this.switchInProgress = false;
-                    console.log('[DUAL VIDEO] Averaging blend transition complete');
-                  }, 50);
-                  
-                }, 50); // Gradual shift
-              }, 100); // Averaging period
-            }, 50); // Initial delay
+              // Main fades in with texture blending
+              this.mainVideo.style.opacity = ratio.toString();
+              // Secondary fades out but stays textured
+              this.secondaryVideo.style.opacity = (1 - ratio).toString();
+              
+              if (progress < steps) {
+                requestAnimationFrame(dissolveStep);
+              } else {
+                // Finalize transition
+                this.mainVideo.style.mixBlendMode = 'normal';
+                this.mainVideo.style.opacity = '1';
+                this.secondaryVideo.style.opacity = '0';
+                this.secondaryVideo.pause();
+                this.currentActive = 'main';
+                this.switchInProgress = false;
+                console.log('[DUAL VIDEO] Textured dissolve complete');
+              }
+            };
+            
+            requestAnimationFrame(dissolveStep);
             
           }).catch(e => {
             console.error('[DUAL VIDEO] Failed to start main video:', e);
