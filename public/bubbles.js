@@ -1300,17 +1300,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
   if (isSafari) {
-    console.log("[SAFARI] Applying improved buffering solution for seamless loops");
+    console.log("[SAFARI] Applying frame blending solution for seamless loops");
     
-    let frameBuffer = null;
+    let endFrameBuffer = null;
+    let startFrameBuffer = null;
     let isTransitioning = false;
     let framesCaptured = false;
     
-    function captureLoopFrames() {
+    function captureTransitionFrames() {
       if (bg.duration <= 0 || bg.readyState < 2 || framesCaptured) return;
-      
-      // Wait for video to be playing normally first
-      if (bg.currentTime < 1.0) return;
       
       try {
         const canvas = document.createElement("canvas");
@@ -1318,90 +1316,145 @@ document.addEventListener("DOMContentLoaded", () => {
         canvas.width = bg.videoWidth || 1920;
         canvas.height = bg.videoHeight || 1080;
         
-        // Capture current frame (not end frame to avoid conflicts)
-        ctx.drawImage(bg, 0, 0);
-        frameBuffer = canvas.toDataURL();
-        framesCaptured = true;
+        // Capture end frame (near end but not at exact end)
+        const endTime = Math.max(0, bg.duration - 0.2);
+        bg.currentTime = endTime;
         
-        console.log("[SAFARI] Frame buffer created for seamless transitions");
+        setTimeout(() => {
+          if (bg.readyState >= 2) {
+            ctx.drawImage(bg, 0, 0);
+            endFrameBuffer = canvas.toDataURL();
+            
+            // Now capture start frame
+            bg.currentTime = 0.05;
+            setTimeout(() => {
+              if (bg.readyState >= 2) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(bg, 0, 0);
+                startFrameBuffer = canvas.toDataURL();
+                framesCaptured = true;
+                
+                console.log("[SAFARI] End and start frames captured for blending");
+                
+                // Resume normal playback
+                bg.currentTime = 0;
+                if (bg.paused) bg.play().catch(() => {});
+              }
+            }, 100);
+          }
+        }, 100);
       } catch (e) {
         console.error("[SAFARI] Frame capture failed:", e);
       }
     }
     
-    function showBufferFrame() {
-      if (!frameBuffer || isTransitioning) return;
+    function createBlendedTransition() {
+      if (!endFrameBuffer || !startFrameBuffer || isTransitioning) return;
       
       isTransitioning = true;
-      console.log("[SAFARI] Using buffered frame for seamless transition");
+      console.log("[SAFARI] Creating blended transition");
       
-      // Create overlay with captured frame
+      // Create overlay canvas
       const overlay = document.createElement("canvas");
-      overlay.style.objectFit = "cover";
-      overlay.style.cssText = bg.style.cssText;
       overlay.style.position = "fixed";
       overlay.style.zIndex = "2";
       overlay.style.pointerEvents = "none";
       overlay.style.top = "0";
       overlay.style.left = "0";
-      overlay.width = window.innerWidth * (window.devicePixelRatio || 1);
-      overlay.height = window.innerHeight * (window.devicePixelRatio || 1);
       overlay.style.width = "100vw";
       overlay.style.height = "100vh";
+      overlay.style.objectFit = "cover";
       overlay.width = window.innerWidth * (window.devicePixelRatio || 1);
-overlay.height = window.innerHeight * (window.devicePixelRatio || 1);
+      overlay.height = window.innerHeight * (window.devicePixelRatio || 1);
       
-      const overlayCtx = overlay.getContext("2d");
+      const ctx = overlay.getContext("2d");
       bg.parentNode.insertBefore(overlay, bg.nextSibling);
       
-      // Draw buffered frame immediately
-      const img = new Image();
-      img.onload = () => {
-        overlayCtx.drawImage(img, 0, 0, overlay.width, overlay.height);
-        
-        // Quick video reset
+      // Create image objects for blending
+      const endImg = new Image();
+      const startImg = new Image();
+      
+      let imagesLoaded = 0;
+      const onImageLoad = () => {
+        imagesLoaded++;
+        if (imagesLoaded === 2) {
+          performBlendedTransition();
+        }
+      };
+      
+      endImg.onload = onImageLoad;
+      startImg.onload = onImageLoad;
+      endImg.src = endFrameBuffer;
+      startImg.src = startFrameBuffer;
+      
+      function performBlendedTransition() {
+        // Reset video immediately
         bg.currentTime = 0;
         
-        // Very short transition back to video
-        setTimeout(() => {
-          overlay.style.transition = "opacity 0.05s linear";
-          overlay.style.opacity = "0";
+        // Animate blend from end frame to start frame
+        let blendProgress = 0;
+        const blendDuration = 100; // 100ms transition
+        const startTime = performance.now();
+        
+        function animateBlend() {
+          const elapsed = performance.now() - startTime;
+          blendProgress = Math.min(1, elapsed / blendDuration);
           
-          setTimeout(() => {
-            overlay.remove();
-            isTransitioning = false;
-            framesCaptured = false; // Allow recapture for next loop
-          }, 60);
-        }, 30);
-      };
-      img.src = frameBuffer;
+          // Clear canvas
+          ctx.clearRect(0, 0, overlay.width, overlay.height);
+          
+          // Draw end frame with decreasing opacity
+          ctx.globalAlpha = 1 - blendProgress;
+          ctx.drawImage(endImg, 0, 0, overlay.width, overlay.height);
+          
+          // Draw start frame with increasing opacity
+          ctx.globalAlpha = blendProgress;
+          ctx.drawImage(startImg, 0, 0, overlay.width, overlay.height);
+          
+          if (blendProgress < 1) {
+            requestAnimationFrame(animateBlend);
+          } else {
+            // Transition complete - fade out overlay to reveal video
+            overlay.style.transition = "opacity 0.05s linear";
+            overlay.style.opacity = "0";
+            
+            setTimeout(() => {
+              overlay.remove();
+              isTransitioning = false;
+              framesCaptured = false; // Allow recapture for next loop
+            }, 60);
+          }
+        }
+        
+        animateBlend();
+      }
     }
     
-    // Capture frames after video has been playing for a bit
-    let captureTimer = null;
+    // Capture frames when video starts playing
     bg.addEventListener("playing", () => {
-      if (captureTimer) clearTimeout(captureTimer);
-      captureTimer = setTimeout(() => {
-        captureLoopFrames();
-      }, 2000); // Wait 2 seconds after playing starts
+      if (!framesCaptured) {
+        setTimeout(() => {
+          captureTransitionFrames();
+        }, 1000); // Wait 1 second after playing starts
+      }
     });
     
-    // More precise trigger timing - very close to end
+    // Trigger blended transition
     bg.addEventListener("timeupdate", () => {
       if (bg.duration > 0) {
         const timeRemaining = bg.duration - bg.currentTime;
         
-        // Trigger at the last possible moment
-        if (timeRemaining <= 0.03 && timeRemaining > 0.01 && !isTransitioning && frameBuffer) {
-          showBufferFrame();
+        // Wider trigger window for better reliability
+        if (timeRemaining <= 0.08 && timeRemaining > 0.04 && !isTransitioning && endFrameBuffer && startFrameBuffer) {
+          createBlendedTransition();
         }
       }
     });
     
     // Backup trigger
     bg.addEventListener("ended", () => {
-      if (!isTransitioning && frameBuffer) {
-        showBufferFrame();
+      if (!isTransitioning && endFrameBuffer && startFrameBuffer) {
+        createBlendedTransition();
       }
     });
   }
