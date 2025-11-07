@@ -1382,122 +1382,480 @@ document.addEventListener("DOMContentLoaded", () => {
       
     } else {
       // ==================== NON-SAFARI SECTION ====================
-      console.log("[NON-SAFARI] Using advanced loop handling");
+      console.log("[NON-SAFARI] Using advanced dual video system with fallbacks");
 
-      bg.loop = true
+      bg.loop = true;
       
-      // Enhanced metadata setup
-      bg.addEventListener("loadedmetadata", () => {
-        try {
-          bg.removeAttribute("poster");
-          bg.poster = "";
-          bg.preload = "auto";
-          bg.loop = true;
-        } catch (e) {
-          console.error("[VIDEO] Metadata setup error:", e);
-        }
-      });
-      // Enhanced seeking/seeked handlers
-      bg.addEventListener("timeupdate", () => {
-        if (bg.duration > 0) {
-          const timeRemaining = bg.duration - bg.currentTime;
+      let dualVideoSystem = null;
+      let currentVideoMode = 'single'; // 'dual' or 'single'
+      let performanceDowngrades = 0;
+      
+      // Dual video system class
+      class DualVideoSystem {
+        constructor(bgVideo, quality) {
+          this.mainVideo = bgVideo;
+          this.quality = quality;
+          this.secondaryVideo = null;
+          this.currentActive = 'main';
+          this.switchInProgress = false;
+          this.preloadBuffer = 1.0; // seconds before end to start preloading
+          this.switchBuffer = 0.2; // seconds before end to switch
+          this.isActive = false;
           
-          // Pure visual effect - no currentTime manipulation
-          if (timeRemaining <= 0.08 && timeRemaining > 0.02) {
-            bg.style.transition = "filter 0.06s ease-out";
-            bg.style.filter = "blur(0.8px) brightness(0.96) contrast(1.02)";
+          console.log(`[DUAL VIDEO] Initializing dual video system for ${quality}`);
+          this.init();
+        }
+        
+        init() {
+          // Create secondary video element
+          this.secondaryVideo = document.createElement('video');
+          this.secondaryVideo.id = 'bgVideoSecondary';
+          this.secondaryVideo.src = this.mainVideo.src;
+          this.secondaryVideo.muted = true;
+          this.secondaryVideo.playsInline = true;
+          this.secondaryVideo.preload = 'auto';
+          
+          // Match main video styles
+          this.secondaryVideo.style.position = 'fixed';
+          this.secondaryVideo.style.top = '0';
+          this.secondaryVideo.style.left = '0';
+          this.secondaryVideo.style.width = '100vw';
+          this.secondaryVideo.style.height = '100vh';
+          this.secondaryVideo.style.objectFit = 'cover';
+          this.secondaryVideo.style.zIndex = this.mainVideo.style.zIndex || '-1';
+          this.secondaryVideo.style.opacity = '0';
+          this.secondaryVideo.style.transition = 'opacity 0.2s ease-in-out';
+          
+          // Insert secondary video next to main video
+          this.mainVideo.parentNode.insertBefore(this.secondaryVideo, this.mainVideo.nextSibling);
+          
+          // Disable native loop on both videos
+          this.mainVideo.loop = false;
+          this.secondaryVideo.loop = false;
+          
+          this.setupEventListeners();
+          this.isActive = true;
+          
+          console.log('[DUAL VIDEO] Secondary video created and positioned');
+        }
+        
+        setupEventListeners() {
+          // Main video timeupdate
+          this.mainVideo.addEventListener('timeupdate', () => {
+            if (!this.isActive || this.switchInProgress) return;
             
-            setTimeout(() => {
-              bg.style.filter = "none";
-              setTimeout(() => {
-                bg.style.transition = "";
-              }, 70);
-            }, 60);
+            const timeLeft = this.mainVideo.duration - this.mainVideo.currentTime;
+            
+            // Preload secondary video
+            if (timeLeft <= this.preloadBuffer && this.currentActive === 'main') {
+              this.preloadSecondary();
+            }
+            
+            // Switch to secondary
+            if (timeLeft <= this.switchBuffer && this.currentActive === 'main') {
+              this.switchToSecondary();
+            }
+          });
+          
+          // Secondary video timeupdate
+          this.secondaryVideo.addEventListener('timeupdate', () => {
+            if (!this.isActive || this.switchInProgress) return;
+            
+            const timeLeft = this.secondaryVideo.duration - this.secondaryVideo.currentTime;
+            
+            // Preload main video
+            if (timeLeft <= this.preloadBuffer && this.currentActive === 'secondary') {
+              this.preloadMain();
+            }
+            
+            // Switch to main
+            if (timeLeft <= this.switchBuffer && this.currentActive === 'secondary') {
+              this.switchToMain();
+            }
+          });
+          
+          // Error handlers
+          this.mainVideo.addEventListener('error', (e) => {
+            console.error('[DUAL VIDEO] Main video error:', e);
+            this.handleError();
+          });
+          
+          this.secondaryVideo.addEventListener('error', (e) => {
+            console.error('[DUAL VIDEO] Secondary video error:', e);
+            this.handleError();
+          });
+        }
+        
+        preloadSecondary() {
+          if (this.secondaryVideo.readyState < 2) {
+            console.log('[DUAL VIDEO] Preloading secondary video');
+            this.secondaryVideo.currentTime = 0;
+            this.secondaryVideo.load();
           }
         }
-      });
-
-      // Simple backup handlers - minimal intervention
-      bg.addEventListener("ended", () => {
-        if (!loopResetInProgress && bg.loop) {
-          loopResetInProgress = true;
-          console.log("[NON-SAFARI] Simple ended handler reset");
-          bg.currentTime = 0;
-          bg.play().catch(() => {});
-          setTimeout(() => { loopResetInProgress = false; }, 100);
-        }
-      });
-
-      // Basic loadstart attributes
-      bg.addEventListener("loadstart", () => {
-        try {
-          bg.preload = "auto";
-          bg.playsInline = true;
-        } catch (e) {}
-      });
-    }
-
-    // ==================== QUALITY MONITORING (ALL BROWSERS) ====================
-    setTimeout(() => {
-      if (typeof bg.getVideoPlaybackQuality === "function") {
-        console.log("[BG VIDEO] Will start quality monitor in 10 seconds...");
         
-        setTimeout(() => {
-          console.log("[BG VIDEO] Starting quality monitor...");
-          let lastTotal = 0;
-          let lastDropped = 0;
-          let monitorStarted = false;
-          let samples = [];
-          const minSamplesBeforeSwitch = 3;
+        preloadMain() {
+          if (this.mainVideo.readyState < 2) {
+            console.log('[DUAL VIDEO] Preloading main video');
+            this.mainVideo.currentTime = 0;
+            this.mainVideo.load();
+          }
+        }
+        
+        switchToSecondary() {
+          if (this.switchInProgress || this.currentActive === 'secondary') return;
           
-          const monitorInterval = setInterval(() => {
-            if (!bg || bg.paused || bg.ended) return;
-            if (!monitorStarted && bg.readyState >= 2) monitorStarted = true;
-            if (!monitorStarted) return;
+          this.switchInProgress = true;
+          console.log('[DUAL VIDEO] Switching to secondary video');
+          if (this.secondaryVideo.readyState < 2) {
+            console.warn('[DUAL VIDEO] Secondary not ready, forcing load');
+            this.secondaryVideo.load();
+          }
+          // Start secondary video from beginning
+          this.secondaryVideo.currentTime = 0;
+          this.secondaryVideo.play().then(() => {
+            // Fade transition
+            this.secondaryVideo.style.opacity = '1';
+            this.mainVideo.style.opacity = '0';
             
-            try {
-              const q = bg.getVideoPlaybackQuality();
-              const total = q.totalVideoFrames || 0;
-              const dropped = q.droppedVideoFrames || 0;
-              const totalDelta = total - lastTotal;
-              const droppedDelta = dropped - lastDropped;
-              lastTotal = total; lastDropped = dropped;
+            setTimeout(() => {
+              this.mainVideo.pause();
+              this.currentActive = 'secondary';
+              this.switchInProgress = false;
+              console.log('[DUAL VIDEO] Switch to secondary complete');
+            }, 200);
+          }).catch(e => {
+            console.error('[DUAL VIDEO] Failed to start secondary video:', e);
+            this.switchInProgress = false; // Reset flag on error
+            this.handleError();
+          });
+        }
+        
+        switchToMain() {
+          if (this.switchInProgress || this.currentActive === 'main') return;
+          
+          this.switchInProgress = true;
+          console.log('[DUAL VIDEO] Switching to main video');
+          
+          // Start main video from beginning
+          this.mainVideo.currentTime = 0;
+          this.mainVideo.play().then(() => {
+            // Fade transition
+            this.mainVideo.style.opacity = '1';
+            this.secondaryVideo.style.opacity = '0';
+            
+            setTimeout(() => {
+              this.secondaryVideo.pause();
+              this.currentActive = 'main';
+              this.switchInProgress = false;
+              console.log('[DUAL VIDEO] Switch to main complete');
+            }, 200);
+          }).catch(e => {
+            console.error('[DUAL VIDEO] Failed to start main video:', e);
+            this.handleError();
+          });
+        }
+        
+        updateSources(newSrc) {
+          console.log(`[DUAL VIDEO] Updating sources to ${newSrc}`);
+          
+          const wasPlaying = !this.mainVideo.paused || !this.secondaryVideo.paused;
+          
+          // Update both video sources
+          this.mainVideo.src = newSrc;
+          this.secondaryVideo.src = newSrc;
+          
+          // Reset to main video
+          this.currentActive = 'main';
+          this.mainVideo.style.opacity = '1';
+          this.secondaryVideo.style.opacity = '0';
+          
+          // Load both videos
+          this.mainVideo.load();
+          this.secondaryVideo.load();
+          
+          if (wasPlaying) {
+            setTimeout(() => {
+              this.mainVideo.play().catch(() => {});
+            }, 100);
+          }
+        }
+        
+        handleError() {
+          console.error('[DUAL VIDEO] Error occurred, falling back to single video');
+          this.destroy();
+          
+          // Trigger performance downgrade
+          if (window.downgradeDualVideo) {
+            window.downgradeDualVideo();
+          }
+        }
+        
+        destroy() {
+          console.log('[DUAL VIDEO] Destroying dual video system');
+          
+          this.isActive = false;
+          
+          // Restore main video
+          this.mainVideo.style.opacity = '1';
+          this.mainVideo.style.transition = '';
+          this.mainVideo.loop = true;
+          
+          // Remove secondary video
+          if (this.secondaryVideo && this.secondaryVideo.parentNode) {
+            this.secondaryVideo.parentNode.removeChild(this.secondaryVideo);
+          }
+          
+          this.secondaryVideo = null;
+          currentVideoMode = 'single';
+        }
+      }
+      
+      // Performance monitoring for dual video
+      function startDualVideoPerformanceMonitor() {
+        if (typeof bg.getVideoPlaybackQuality !== "function") {
+          console.log('[DUAL VIDEO] getVideoPlaybackQuality not available, skipping performance monitoring');
+          return;
+        }
+        
+        console.log("[DUAL VIDEO] Starting performance monitor...");
+        let lastTotal = 0;
+        let lastDropped = 0;
+        let samples = [];
+        const minSamplesBeforeDowngrade = 5;
+        let monitorStarted = false;
+        
+        const monitorInterval = setInterval(() => {
+          if (!bg || bg.paused || bg.ended) return;
+          if (!monitorStarted && bg.readyState >= 2) monitorStarted = true;
+          if (!monitorStarted) return;
+          
+          try {
+            const q = bg.getVideoPlaybackQuality();
+            const total = q.totalVideoFrames || 0;
+            const dropped = q.droppedVideoFrames || 0;
+            const totalDelta = total - lastTotal;
+            const droppedDelta = dropped - lastDropped;
+            lastTotal = total; lastDropped = dropped;
+            
+            if (totalDelta > 0) {
+              const fps = totalDelta / 3;
+              const dropRatio = droppedDelta / Math.max(1, totalDelta);
               
-              if (totalDelta > 0) {
-                const fps = totalDelta / 3;
-                const dropRatio = droppedDelta / Math.max(1, totalDelta);
+              samples.push({ fps, dropRatio });
+              
+              console.log(`[DUAL VIDEO] FPS: ${fps.toFixed(1)}, Drop ratio: ${(dropRatio*100).toFixed(1)}%, Mode: ${currentVideoMode}, Samples: ${samples.length}/${minSamplesBeforeDowngrade}`);
+              
+              if (samples.length >= minSamplesBeforeDowngrade) {
+                const avgFps = samples.reduce((sum, s) => sum + s.fps, 0) / samples.length;
+                const avgDropRatio = samples.reduce((sum, s) => sum + s.dropRatio, 0) / samples.length;
                 
-                samples.push({ fps, dropRatio });
+                console.log(`[DUAL VIDEO] Average over ${samples.length} samples: FPS: ${avgFps.toFixed(1)}, Drop ratio: ${(avgDropRatio*100).toFixed(1)}%`);
                 
-                console.log(`[BG VIDEO] FPS: ${fps.toFixed(1)}, Drop ratio: ${(dropRatio*100).toFixed(1)}%, Samples: ${samples.length}/${minSamplesBeforeSwitch}, Current: ${videoVariants[currentBgVariant].src}`);
+                // More aggressive thresholds for dual video (since it uses more resources)
+                if ((avgFps < 20 || avgDropRatio > 0.15) && currentVideoMode === 'dual') {
+                  console.log(`[DUAL VIDEO] Performance issue detected - downgrading from dual video`);
+                  downgradeDualVideo();
+                  samples = [];
+                } else if ((avgFps < 17 || avgDropRatio > 0.24) && currentVideoMode === 'single' && currentBgVariant < videoVariants.length - 1) {
+                  console.log(`[DUAL VIDEO] Performance issue detected - switching to lower quality`);
+                  downgradeDualVideo();
+                  samples = [];
+                }
                 
-                if (samples.length >= minSamplesBeforeSwitch) {
-                  const avgFps = samples.reduce((sum, s) => sum + s.fps, 0) / samples.length;
-                  const avgDropRatio = samples.reduce((sum, s) => sum + s.dropRatio, 0) / samples.length;
-                  
-                  console.log(`[BG VIDEO] Average over ${samples.length} samples: FPS: ${avgFps.toFixed(1)}, Drop ratio: ${(avgDropRatio*100).toFixed(1)}%`);
-                  
-                  if ((avgFps < 17 || avgDropRatio > 0.24) && !switchedDueToChoppy && currentBgVariant < videoVariants.length - 1) {
-                    console.log(`[BG VIDEO] Performance issue detected based on averages - switching down`);
-                    switchedDueToChoppy = true;
-                    setBgVideoVariant(currentBgVariant + 1, "performance");
-                    samples = [];
-                  }
-                  
-                  if (samples.length > 10) {
-                    samples = samples.slice(-10);
-                  }
+                // Keep only recent samples
+                if (samples.length > 10) {
+                  samples = samples.slice(-5);
                 }
               }
-            } catch (e) { 
-              console.error("[BG VIDEO] Quality monitoring error:", e);
             }
-          }, 3000);
-
-        }, 5000);
+          } catch (e) { 
+            console.error("[DUAL VIDEO] Performance monitoring error:", e);
+          }
+        }, 3000);
+        
+        return monitorInterval;
       }
-    }, 1000);
+      
+      // Progressive downgrade system
+      window.downgradeDualVideo = () => {
+        performanceDowngrades++;
+        console.log(`[DUAL VIDEO] Performance downgrade #${performanceDowngrades}`);
+        
+        // Current state: dual 1080p
+        if (performanceDowngrades === 1 && currentVideoMode === 'dual' && currentBgVariant === 0) {
+          console.log('[DUAL VIDEO] 1080p dual → 1080p single');
+          if (dualVideoSystem) {
+            dualVideoSystem.destroy();
+            dualVideoSystem = null;
+          }
+          initializeSingleVideo();
+          
+        // Current state: single 1080p
+        } else if (performanceDowngrades === 2 && currentVideoMode === 'single' && currentBgVariant === 0) {
+          console.log('[DUAL VIDEO] 1080p single → 720p dual');
+          setBgVideoVariant(1, "performance-dual");
+          setTimeout(() => initializeDualVideo(), 500);
+          
+        // Current state: dual 720p
+        } else if (performanceDowngrades === 3 && currentVideoMode === 'dual' && currentBgVariant === 1) {
+          console.log('[DUAL VIDEO] 720p dual → 720p single');
+          if (dualVideoSystem) {
+            dualVideoSystem.destroy();
+            dualVideoSystem = null;
+          }
+          initializeSingleVideo();
+          
+        // Current state: single 720p
+        } else if (performanceDowngrades === 4 && currentVideoMode === 'single' && currentBgVariant === 1) {
+          console.log('[DUAL VIDEO] 720p single → 480p dual');
+          setBgVideoVariant(2, "performance-dual");
+          setTimeout(() => initializeDualVideo(), 500);
+          
+        // Current state: dual 480p
+        } else if (performanceDowngrades === 5 && currentVideoMode === 'dual' && currentBgVariant === 2) {
+          console.log('[DUAL VIDEO] 480p dual → 480p single');
+          if (dualVideoSystem) {
+            dualVideoSystem.destroy();
+            dualVideoSystem = null;
+          }
+          initializeSingleVideo();
+          
+        } else {
+          console.log('[DUAL VIDEO] No valid downgrade path or already at minimum');
+        }
+      };
+      
+      // Initialize dual video system
+      function initializeDualVideo() {
+        if (dualVideoSystem) {
+          dualVideoSystem.destroy();
+        }
+        
+        const qualityName = videoVariants[currentBgVariant].src;
+        dualVideoSystem = new DualVideoSystem(bg, qualityName);
+        currentVideoMode = 'dual';
+        
+        console.log(`[DUAL VIDEO] Initialized dual video system with ${qualityName}`);
+      }
+      
+      // Initialize single video system
+      function initializeSingleVideo() {
+        if (dualVideoSystem) {
+          dualVideoSystem.destroy();
+          dualVideoSystem = null;
+        }
+        
+        currentVideoMode = 'single';
+        console.log(`[DUAL VIDEO] Using single video mode with ${videoVariants[currentBgVariant].src}`);
+        
+        // Standard single video setup
+        bg.loop = true;
+        
+        // Enhanced metadata setup
+        bg.addEventListener("loadedmetadata", () => {
+          try {
+            bg.removeAttribute("poster");
+            bg.poster = "";
+            bg.preload = "auto";
+            bg.loop = true;
+          } catch (e) {
+            console.error("[VIDEO] Metadata setup error:", e);
+          }
+        });
+        
+        // Enhanced seeking/seeked handlers
+        bg.addEventListener("timeupdate", () => {
+          if (bg.duration > 0) {
+            const timeRemaining = bg.duration - bg.currentTime;
+            
+            // Pure visual effect - no currentTime manipulation
+            if (timeRemaining <= 0.08 && timeRemaining > 0.02) {
+              bg.style.transition = "filter 0.06s ease-out";
+              bg.style.filter = "blur(0.8px) brightness(0.96) contrast(1.02)";
+              
+              setTimeout(() => {
+                bg.style.filter = "none";
+                setTimeout(() => {
+                  bg.style.transition = "";
+                }, 70);
+              }, 60);
+            }
+          }
+        });
 
+        // Simple backup handlers - minimal intervention
+        bg.addEventListener("ended", () => {
+          if (!loopResetInProgress && bg.loop) {
+            loopResetInProgress = true;
+            console.log("[SINGLE VIDEO] Simple ended handler reset");
+            bg.currentTime = 0;
+            bg.play().catch(() => {});
+            setTimeout(() => { loopResetInProgress = false; }, 100);
+          }
+        });
+
+        // Basic loadstart attributes
+        bg.addEventListener("loadstart", () => {
+          try {
+            bg.preload = "auto";
+            bg.playsInline = true;
+          } catch (e) {}
+        });
+      }
+      
+      // Override setBgVideoVariant to handle dual video
+      const originalSetBgVideoVariant = window.setBgVideoVariant;
+      window.setBgVideoVariant = (idx, reason) => {
+        const prevVariant = currentBgVariant;
+        
+        // Call original function
+        originalSetBgVideoVariant(idx, reason);
+        
+        // Update dual video system if active
+        if (dualVideoSystem && dualVideoSystem.isActive) {
+          const newSrc = videoVariants[idx].src;
+          dualVideoSystem.updateSources(newSrc);
+          console.log(`[DUAL VIDEO] Updated sources from ${videoVariants[prevVariant]?.src} to ${newSrc} (${reason})`);
+        }
+      };
+      
+      // Detect if machine can handle dual video (high-end check)
+      function canHandleDualVideo() {
+        const deviceMemory = navigator.deviceMemory || 4;
+        const hardwareConcurrency = navigator.hardwareConcurrency || 4;
+        const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+        const effectiveType = conn?.effectiveType || '4g';
+        
+        // High-end device indicators
+        const hasGoodMemory = deviceMemory >= 4;
+        const hasGoodCPU = hardwareConcurrency >= 4;
+        const hasGoodConnection = effectiveType === '4g' || !effectiveType.includes('g');
+        
+        const score = [hasGoodMemory, hasGoodCPU, hasGoodConnection].filter(Boolean).length;
+        
+        console.log(`[DUAL VIDEO] Device capability check: Memory: ${deviceMemory}GB, CPU: ${hardwareConcurrency} cores, Connection: ${effectiveType}, Score: ${score}/3`);
+        
+        return score >= 2; // Need at least 2/3 indicators
+      }
+      function initializeVideoSystem() {
+        const initSystem = () => {
+          if (canHandleDualVideo() && currentBgVariant <= 1) {
+            initializeDualVideo();
+          } else {
+            console.log('[DUAL VIDEO] Lower-end device detected, starting with single video');
+            initializeSingleVideo();
+          }
+          setTimeout(startDualVideoPerformanceMonitor, 3000);
+        };
+        if (bg.readyState >= 2) {
+          initSystem();
+        } else {
+          bg.addEventListener("loadeddata", initSystem, { once: true });
+        }
+      }
+      setTimeout(initializeVideoSystem, 1000);
+    }
     window.__setBgVideoVariant = (i) => { setBgVideoVariant(i, "manual"); };
   })();
 
