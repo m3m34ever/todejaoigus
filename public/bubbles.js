@@ -1202,22 +1202,26 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!bg || bg.readyState < 2) return;
         
         try {
-          console.log("[SAFARI] Generating edge-preserving wave fallback");
+          console.log("[SAFARI] Generating wave-motion preserving fallback");
           
           const originalTime = bg.currentTime;
           const wasPlaying = !bg.paused;
           
-          // Capture just 3 key frames
-          const keyTimes = [
-            0.1, 
-            bg.duration * 0.5, 
-            Math.max(0, bg.duration - 0.3)
+          // Capture frames at different wave phases to preserve motion
+          const wavePhases = [
+            { time: 0.1, name: 'start' },
+            { time: bg.duration * 0.2, name: 'early' },
+            { time: bg.duration * 0.4, name: 'mid-early' },
+            { time: bg.duration * 0.6, name: 'mid-late' },
+            { time: bg.duration * 0.8, name: 'late' },
+            { time: Math.max(0, bg.duration - 0.3), name: 'end' }
           ];
           
           const frames = [];
           
-          for (const time of keyTimes) {
-            bg.currentTime = time;
+          // Capture all wave phase frames
+          for (const phase of wavePhases) {
+            bg.currentTime = phase.time;
             
             await new Promise(resolve => {
               const onSeeked = () => {
@@ -1234,62 +1238,99 @@ document.addEventListener("DOMContentLoaded", () => {
             const tempCtx = tempCanvas.getContext("2d");
             tempCtx.drawImage(bg, 0, 0);
             
-            frames.push(tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height));
+            frames.push({
+              data: tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height),
+              phase: phase.name,
+              time: phase.time
+            });
+            
             tempCanvas.remove();
+            console.log(`[SAFARI] Captured ${phase.name} wave phase at ${phase.time.toFixed(2)}s`);
           }
           
-          // Edge-preserving blend
+          // Create wave-preserving composite
           const ctx = staticCanvas.getContext("2d");
           const width = bg.videoWidth;
           const height = bg.videoHeight;
           const finalData = ctx.createImageData(width, height);
           const finalPixels = finalData.data;
           
-          for (let y = 1; y < height - 1; y++) {
-            for (let x = 1; x < width - 1; x++) {
+          // Instead of averaging, use spatial wave analysis
+          for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
               const pixelIndex = (y * width + x) * 4;
               
-              // Check if this pixel is on an edge (high contrast area)
-              let maxVariance = 0;
-              let bestFrame = 0;
+              // Calculate wave characteristics for this pixel position
+              const normalizedY = y / height;
+              const normalizedX = x / width;
               
-              for (let frameIdx = 0; frameIdx < frames.length; frameIdx++) {
-                const frame = frames[frameIdx];
+              // Simulate wave motion patterns
+              const horizontalWave = Math.sin(normalizedX * Math.PI * 3) * 0.5 + 0.5;
+              const verticalWave = Math.sin(normalizedY * Math.PI * 2) * 0.5 + 0.5;
+              const diagonalWave = Math.sin((normalizedX + normalizedY) * Math.PI * 2) * 0.5 + 0.5;
+              
+              // Combine wave influences
+              const waveIntensity = (horizontalWave + verticalWave + diagonalWave) / 3;
+              
+              // Choose frame based on wave characteristics at this position
+              let selectedFrameIndex;
+              if (waveIntensity > 0.8) {
+                // High intensity area - use peak frames
+                selectedFrameIndex = Math.random() > 0.5 ? 0 : 5; // start or end
+              } else if (waveIntensity > 0.6) {
+                // Medium-high intensity - use mid-range frames
+                selectedFrameIndex = Math.random() > 0.5 ? 1 : 4; // early or late
+              } else if (waveIntensity > 0.4) {
+                // Medium intensity - use middle frames
+                selectedFrameIndex = Math.random() > 0.5 ? 2 : 3; // mid-early or mid-late
+              } else {
+                // Low intensity - blend between adjacent frames
+                const frame1 = frames[2];
+                const frame2 = frames[3];
+                const blendRatio = Math.random();
                 
-                // Calculate local variance (edge detection)
-                const centerR = frame.data[pixelIndex];
-                const centerG = frame.data[pixelIndex + 1];
-                const centerB = frame.data[pixelIndex + 2];
+                const r1 = frame1.data.data[pixelIndex];
+                const g1 = frame1.data.data[pixelIndex + 1];
+                const b1 = frame1.data.data[pixelIndex + 2];
+                const a1 = frame1.data.data[pixelIndex + 3];
                 
-                let variance = 0;
-                // Check surrounding pixels
-                for (let dy = -1; dy <= 1; dy++) {
-                  for (let dx = -1; dx <= 1; dx++) {
-                    if (dx === 0 && dy === 0) continue;
-                    const neighborIdx = ((y + dy) * width + (x + dx)) * 4;
-                    
-                    const nR = frame.data[neighborIdx];
-                    const nG = frame.data[neighborIdx + 1];
-                    const nB = frame.data[neighborIdx + 2];
-                    
-                    variance += Math.abs(centerR - nR) + Math.abs(centerG - nG) + Math.abs(centerB - nB);
-                  }
-                }
+                const r2 = frame2.data.data[pixelIndex];
+                const g2 = frame2.data.data[pixelIndex + 1];
+                const b2 = frame2.data.data[pixelIndex + 2];
+                const a2 = frame2.data.data[pixelIndex + 3];
                 
-                // Use frame with highest local contrast (most texture detail)
-                if (variance > maxVariance) {
-                  maxVariance = variance;
-                  bestFrame = frameIdx;
-                }
+                finalPixels[pixelIndex] = Math.round(r1 * (1 - blendRatio) + r2 * blendRatio);
+                finalPixels[pixelIndex + 1] = Math.round(g1 * (1 - blendRatio) + g2 * blendRatio);
+                finalPixels[pixelIndex + 2] = Math.round(b1 * (1 - blendRatio) + b2 * blendRatio);
+                finalPixels[pixelIndex + 3] = Math.round(a1 * (1 - blendRatio) + a2 * blendRatio);
+                continue;
               }
               
-              // Use the frame with most texture detail at this location
-              const selectedFrame = frames[bestFrame];
-              finalPixels[pixelIndex] = selectedFrame.data[pixelIndex];
-              finalPixels[pixelIndex + 1] = selectedFrame.data[pixelIndex + 1];
-              finalPixels[pixelIndex + 2] = selectedFrame.data[pixelIndex + 2];
-              finalPixels[pixelIndex + 3] = selectedFrame.data[pixelIndex + 3];
+              // Use selected frame directly (preserves texture)
+              const selectedFrame = frames[selectedFrameIndex];
+              finalPixels[pixelIndex] = selectedFrame.data.data[pixelIndex];
+              finalPixels[pixelIndex + 1] = selectedFrame.data.data[pixelIndex + 1];
+              finalPixels[pixelIndex + 2] = selectedFrame.data.data[pixelIndex + 2];
+              finalPixels[pixelIndex + 3] = selectedFrame.data.data[pixelIndex + 3];
             }
+          }
+          
+          // Apply subtle texture enhancement
+          for (let i = 0; i < finalPixels.length; i += 4) {
+            // Enhance contrast slightly to maintain texture definition
+            const r = finalPixels[i];
+            const g = finalPixels[i + 1];
+            const b = finalPixels[i + 2];
+            
+            // Calculate luminance
+            const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+            
+            // Enhance contrast based on luminance
+            const contrast = luminance > 128 ? 1.1 : 0.95;
+            
+            finalPixels[i] = Math.min(255, Math.max(0, Math.round(r * contrast)));
+            finalPixels[i + 1] = Math.min(255, Math.max(0, Math.round(g * contrast)));
+            finalPixels[i + 2] = Math.min(255, Math.max(0, Math.round(b * contrast)));
           }
           
           ctx.putImageData(finalData, 0, 0);
@@ -1307,10 +1348,10 @@ document.addEventListener("DOMContentLoaded", () => {
             bg.play().catch(() => {});
           }
           
-          console.log("[SAFARI] Edge-preserving wave fallback complete");
+          console.log("[SAFARI] Wave-motion preserving fallback complete");
           
         } catch (e) {
-          console.error("[SAFARI] Edge-preserving fallback failed:", e);
+          console.error("[SAFARI] Wave-motion preserving fallback failed:", e);
         }
       };
       
