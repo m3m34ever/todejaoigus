@@ -1300,161 +1300,37 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
   if (isSafari) {
-    console.log("[SAFARI] Applying frame blending solution for seamless loops");
+    console.log("[SAFARI] Applying ultra-simple gap elimination");
     
-    let endFrameBuffer = null;
-    let startFrameBuffer = null;
-    let isTransitioning = false;
-    let framesCaptured = false;
+    let preventingGap = false;
     
-    function captureTransitionFrames() {
-      if (bg.duration <= 0 || bg.readyState < 2 || framesCaptured) return;
-      
-      try {
-        const canvas = document.createElement("canvas");
-        const ctx = canvas.getContext("2d");
-        canvas.width = bg.videoWidth || 1920;
-        canvas.height = bg.videoHeight || 1080;
-        
-        // Capture end frame (near end but not at exact end)
-        const endTime = Math.max(0, bg.duration - 0.2);
-        bg.currentTime = endTime;
-        
-        setTimeout(() => {
-          if (bg.readyState >= 2) {
-            ctx.drawImage(bg, 0, 0);
-            endFrameBuffer = canvas.toDataURL();
-            
-            // Now capture start frame
-            bg.currentTime = 0.05;
-            setTimeout(() => {
-              if (bg.readyState >= 2) {
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                ctx.drawImage(bg, 0, 0);
-                startFrameBuffer = canvas.toDataURL();
-                framesCaptured = true;
-                
-                console.log("[SAFARI] End and start frames captured for blending");
-                
-                // Resume normal playback
-                bg.currentTime = 0;
-                if (bg.paused) bg.play().catch(() => {});
-              }
-            }, 100);
-          }
-        }, 100);
-      } catch (e) {
-        console.error("[SAFARI] Frame capture failed:", e);
-      }
-    }
-    
-    function createBlendedTransition() {
-      if (!endFrameBuffer || !startFrameBuffer || isTransitioning) return;
-      
-      isTransitioning = true;
-      console.log("[SAFARI] Creating blended transition");
-      
-      // Create overlay canvas
-      const overlay = document.createElement("canvas");
-      overlay.style.position = "fixed";
-      overlay.style.zIndex = "2";
-      overlay.style.pointerEvents = "none";
-      overlay.style.top = "0";
-      overlay.style.left = "0";
-      overlay.style.width = "100vw";
-      overlay.style.height = "100vh";
-      overlay.style.objectFit = "cover";
-      overlay.width = window.innerWidth * (window.devicePixelRatio || 1);
-      overlay.height = window.innerHeight * (window.devicePixelRatio || 1);
-      
-      const ctx = overlay.getContext("2d");
-      bg.parentNode.insertBefore(overlay, bg.nextSibling);
-      
-      // Create image objects for blending
-      const endImg = new Image();
-      const startImg = new Image();
-      
-      let imagesLoaded = 0;
-      const onImageLoad = () => {
-        imagesLoaded++;
-        if (imagesLoaded === 2) {
-          performBlendedTransition();
-        }
-      };
-      
-      endImg.onload = onImageLoad;
-      startImg.onload = onImageLoad;
-      endImg.src = endFrameBuffer;
-      startImg.src = startFrameBuffer;
-      
-      function performBlendedTransition() {
-        // Reset video immediately
-        bg.currentTime = 0;
-        
-        // Animate blend from end frame to start frame
-        let blendProgress = 0;
-        const blendDuration = 100; // 100ms transition
-        const startTime = performance.now();
-        
-        function animateBlend() {
-          const elapsed = performance.now() - startTime;
-          blendProgress = Math.min(1, elapsed / blendDuration);
-          
-          // Clear canvas
-          ctx.clearRect(0, 0, overlay.width, overlay.height);
-          
-          // Draw end frame with decreasing opacity
-          ctx.globalAlpha = 1 - blendProgress;
-          ctx.drawImage(endImg, 0, 0, overlay.width, overlay.height);
-          
-          // Draw start frame with increasing opacity
-          ctx.globalAlpha = blendProgress;
-          ctx.drawImage(startImg, 0, 0, overlay.width, overlay.height);
-          
-          if (blendProgress < 1) {
-            requestAnimationFrame(animateBlend);
-          } else {
-            // Transition complete - fade out overlay to reveal video
-            overlay.style.transition = "opacity 0.05s linear";
-            overlay.style.opacity = "0";
-            
-            setTimeout(() => {
-              overlay.remove();
-              isTransitioning = false;
-              framesCaptured = false; // Allow recapture for next loop
-            }, 60);
-          }
-        }
-        
-        animateBlend();
-      }
-    }
-    
-    // Capture frames when video starts playing
-    bg.addEventListener("playing", () => {
-      if (!framesCaptured) {
-        setTimeout(() => {
-          captureTransitionFrames();
-        }, 1000); // Wait 1 second after playing starts
-      }
-    });
-    
-    // Trigger blended transition
+    // Extremely aggressive early reset
     bg.addEventListener("timeupdate", () => {
-      if (bg.duration > 0) {
+      if (bg.duration > 0 && !preventingGap) {
         const timeRemaining = bg.duration - bg.currentTime;
         
-        // Wider trigger window for better reliability
-        if (timeRemaining <= 0.08 && timeRemaining > 0.04 && !isTransitioning && endFrameBuffer && startFrameBuffer) {
-          createBlendedTransition();
+        // Reset much earlier to avoid any gap
+        if (timeRemaining <= 0.2) {
+          preventingGap = true;
+          console.log("[SAFARI] Ultra-early reset to prevent gap");
+          
+          // Immediate reset with no delays
+          bg.currentTime = 0.05; // Start slightly into video
+          
+          setTimeout(() => {
+            bg.currentTime = 0; // Perfect start
+            preventingGap = false;
+          }, 50);
         }
       }
     });
     
-    // Backup trigger
-    bg.addEventListener("ended", () => {
-      if (!isTransitioning && endFrameBuffer && startFrameBuffer) {
-        createBlendedTransition();
+    // Force immediate restart on any pause during loop
+    bg.addEventListener("pause", (e) => {
+      if (bg.currentTime >= bg.duration - 0.5) {
+        e.preventDefault();
+        bg.currentTime = 0;
+        bg.play().catch(() => {});
       }
     });
   }
