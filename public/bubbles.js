@@ -1150,13 +1150,12 @@ document.addEventListener("DOMContentLoaded", () => {
     // ==================== SAFARI-ONLY SECTION ====================
     // because safari is broken and cannot handle video loops properly -_-
     if (isSafari) {
-      console.log("[SAFARI] Using blended static fallback during video resets");
+      console.log("[SAFARI] Using cached generated fallback");
 
-      // Disable native loop - we handle it manually
       bg.loop = false;
       bg.removeAttribute("loop");
       
-      // Create blended static background canvas
+      // Create canvas for cached fallback
       const staticCanvas = document.createElement("canvas");
       staticCanvas.id = "safariStaticFallback";
       staticCanvas.style.position = "fixed";
@@ -1166,54 +1165,31 @@ document.addEventListener("DOMContentLoaded", () => {
       staticCanvas.style.height = "100vh";
       staticCanvas.style.objectFit = "cover";
       staticCanvas.style.zIndex = parseInt(getComputedStyle(bg).zIndex || "-1") - 1;
-      staticCanvas.style.display = "none"; // Hidden by default
+      staticCanvas.style.display = "none";
       
-      // Insert canvas behind the video
       bg.parentNode.insertBefore(staticCanvas, bg);
       
       let safariResetInProgress = false;
-      let blendedBackgroundReady = false;
-      let fallbackCreationInProgress = false;
+      let fallbackCache = new Map(); // Cache by video src
       
-      // Create a simple first-frame fallback immediately
-      const createImmediateFallback = () => {
-        if (blendedBackgroundReady || !bg || bg.readyState < 2 || bg.videoWidth === 0) {
-          return;
+      // Generate fallback once per video and cache forever
+      const getOrCreateFallback = async (videoSrc) => {
+        // Check cache first
+        if (fallbackCache.has(videoSrc)) {
+          const cached = fallbackCache.get(videoSrc);
+          const ctx = staticCanvas.getContext("2d");
+          ctx.putImageData(cached, 0, 0);
+          console.log("[SAFARI] Using cached fallback for", videoSrc);
+          return true;
         }
         
+        // Generate new fallback
         try {
-          console.log("[SAFARI] Creating immediate first-frame fallback");
+          console.log("[SAFARI] Generating new fallback for", videoSrc);
           
           staticCanvas.width = bg.videoWidth;
           staticCanvas.height = bg.videoHeight;
-          const ctx = staticCanvas.getContext("2d");
           
-          // Draw current frame (should be first frame)
-          ctx.drawImage(bg, 0, 0);
-          blendedBackgroundReady = true; // Mark as ready immediately
-          
-          console.log("[SAFARI] Immediate fallback ready");
-          
-          // Now try to create the better blended version in background
-          setTimeout(createBlendedFallback, 100);
-          
-        } catch (e) {
-          console.error("[SAFARI] Immediate fallback creation failed:", e);
-        }
-      };
-      
-      // Create blended first+last frame background (enhanced version)
-      const createBlendedFallback = async () => {
-        if (fallbackCreationInProgress || !bg || bg.readyState < 2 || bg.videoWidth === 0) {
-          return;
-        }
-        
-        fallbackCreationInProgress = true;
-        
-        try {
-          console.log("[SAFARI] Creating enhanced blended first+last frame fallback");
-          
-          // Store current position
           const originalTime = bg.currentTime;
           const wasPlaying = !bg.paused;
           
@@ -1225,7 +1201,7 @@ document.addEventListener("DOMContentLoaded", () => {
               resolve();
             };
             bg.addEventListener('seeked', onSeeked);
-            setTimeout(resolve, 500); // Fallback timeout
+            setTimeout(resolve, 500);
           });
           
           const tempCanvas = document.createElement("canvas");
@@ -1233,7 +1209,6 @@ document.addEventListener("DOMContentLoaded", () => {
           tempCanvas.height = bg.videoHeight;
           const tempCtx = tempCanvas.getContext("2d");
           
-          // Draw first frame
           tempCtx.drawImage(bg, 0, 0);
           const firstFrameData = tempCtx.getImageData(0, 0, staticCanvas.width, staticCanvas.height);
           
@@ -1245,14 +1220,13 @@ document.addEventListener("DOMContentLoaded", () => {
               resolve();
             };
             bg.addEventListener('seeked', onSeeked);
-            setTimeout(resolve, 500); // Fallback timeout
+            setTimeout(resolve, 500);
           });
           
-          // Draw last frame
           tempCtx.drawImage(bg, 0, 0);
           const lastFrameData = tempCtx.getImageData(0, 0, staticCanvas.width, staticCanvas.height);
           
-          // Blend frames (50/50 mix)
+          // Blend frames
           const ctx = staticCanvas.getContext("2d");
           const blendedData = ctx.createImageData(staticCanvas.width, staticCanvas.height);
           const firstPixels = firstFrameData.data;
@@ -1260,140 +1234,69 @@ document.addEventListener("DOMContentLoaded", () => {
           const blendedPixels = blendedData.data;
           
           for (let i = 0; i < firstPixels.length; i += 4) {
-            blendedPixels[i] = Math.round((firstPixels[i] + lastPixels[i]) / 2);         // Red
-            blendedPixels[i + 1] = Math.round((firstPixels[i + 1] + lastPixels[i + 1]) / 2); // Green
-            blendedPixels[i + 2] = Math.round((firstPixels[i + 2] + lastPixels[i + 2]) / 2); // Blue
-            blendedPixels[i + 3] = Math.round((firstPixels[i + 3] + lastPixels[i + 3]) / 2); // Alpha
+            blendedPixels[i] = Math.round((firstPixels[i] + lastPixels[i]) / 2);
+            blendedPixels[i + 1] = Math.round((firstPixels[i + 1] + lastPixels[i + 1]) / 2);
+            blendedPixels[i + 2] = Math.round((firstPixels[i + 2] + lastPixels[i + 2]) / 2);
+            blendedPixels[i + 3] = Math.round((firstPixels[i + 3] + lastPixels[i + 3]) / 2);
           }
           
-          // Draw blended result to static canvas
           ctx.putImageData(blendedData, 0, 0);
           
-          // Restore original position and playback state
+          // Cache forever (or until page reload)
+          fallbackCache.set(videoSrc, blendedData);
+          
+          // Restore video state
           bg.currentTime = originalTime;
           if (wasPlaying && bg.paused) {
             bg.play().catch(() => {});
           }
           
-          console.log("[SAFARI] Enhanced blended fallback ready");
+          console.log("[SAFARI] Generated and cached fallback for", videoSrc);
           tempCanvas.remove();
+          return true;
           
         } catch (e) {
-          console.error("[SAFARI] Enhanced blending failed:", e);
-        } finally {
-          fallbackCreationInProgress = false;
+          console.error("[SAFARI] Fallback generation failed:", e);
+          return false;
         }
       };
       
-      // Safari video reset handler with static fallback
+      // Simple reset handler using cached fallback
       const safariResetHandler = () => {
         if (safariResetInProgress || bg.duration <= 0) return;
         
         const timeLeft = bg.duration - bg.currentTime;
         
-        // Reset early to avoid Safari's blank screen
         if (timeLeft <= 1.0) {
           safariResetInProgress = true;
-          console.log("[SAFARI] Reset triggered - showing static fallback");
           
-          // ALWAYS show static background BEFORE reset (even if not perfect)
-          if (blendedBackgroundReady) {
-            staticCanvas.style.display = "block";
-            bg.style.opacity = "0";
-          } else {
-            // Emergency: create immediate fallback if none exists
-            console.log("[SAFARI] No fallback ready - creating emergency fallback");
-            createImmediateFallback();
-            if (blendedBackgroundReady) {
-              staticCanvas.style.display = "block";
-              bg.style.opacity = "0";
-            }
-          }
+          // Show cached fallback instantly
+          staticCanvas.style.display = "block";
+          bg.style.opacity = "0";
           
-          // Reset video
           bg.currentTime = 0;
           
-          // Brief delay to ensure reset completes
           setTimeout(() => {
-            // Hide static background and show video again
             staticCanvas.style.display = "none";
             bg.style.opacity = "1";
             
-            // Ensure video continues playing
             if (bg.paused) {
               bg.play().catch(() => {});
             }
             
             safariResetInProgress = false;
-          }, 150); // Slightly longer delay
+          }, 100);
         }
       };
       
-      // Add handlers
+      // Generate fallback when video loads
+      bg.addEventListener("loadeddata", () => {
+        getOrCreateFallback(bg.src);
+      });
+      
       bg.addEventListener("timeupdate", safariResetHandler);
       
-      // Create immediate fallback as soon as video is ready
-      bg.addEventListener("loadeddata", createImmediateFallback);
-      bg.addEventListener("canplay", createImmediateFallback);
-      
-      // Also try on first frame
-      bg.addEventListener("loadstart", () => {
-        // Try to create fallback once video starts loading
-        setTimeout(() => {
-          if (!blendedBackgroundReady) {
-            createImmediateFallback();
-          }
-        }, 200);
-      });
-      
-      // Emergency backup for ended events
-      bg.addEventListener("ended", () => {
-        if (!safariResetInProgress) {
-          safariResetInProgress = true;
-          
-          // Show static during emergency reset
-          if (blendedBackgroundReady) {
-            staticCanvas.style.display = "block";
-            bg.style.opacity = "0";
-          }
-          
-          bg.currentTime = 0;
-          bg.play().then(() => {
-            // Hide static and show video
-            staticCanvas.style.display = "none";
-            bg.style.opacity = "1";
-            safariResetInProgress = false;
-          }).catch(() => {
-            safariResetInProgress = false;
-          });
-        }
-      });
-      
-      // Handle video quality changes - recreate blended background
-      const originalSetBgVideoVariant = window.setBgVideoVariant || setBgVideoVariant;
-      window.setBgVideoVariant = (idx, reason) => {
-        const newSrc = videoVariants[idx].src;
-        
-        // Mark background as not ready
-        blendedBackgroundReady = false;
-        fallbackCreationInProgress = false;
-        
-        // Update video source
-        bg.src = newSrc;
-        bg.load();
-        
-        // Recreate immediate fallback when new video loads
-        bg.addEventListener("loadeddata", createImmediateFallback, { once: true });
-        
-        // Continue with original function logic
-        if (originalSetBgVideoVariant) {
-          originalSetBgVideoVariant(idx, reason);
-        }
-        
-        console.log(`[SAFARI] Updated video to ${newSrc} - will recreate fallback`);
-      };
-      
-      console.log("[SAFARI] Video with immediate + blended static fallback initialized");
+      console.log("[SAFARI] Cached fallback system initialized");
       
     } else {
       // ==================== NON-SAFARI SECTION ====================
