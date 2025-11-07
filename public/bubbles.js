@@ -1150,146 +1150,197 @@ document.addEventListener("DOMContentLoaded", () => {
     // ==================== SAFARI-ONLY SECTION ====================
     // because safari is broken and cannot handle video loops properly -_-
     if (isSafari) {
-      console.log("[SAFARI] Applying dual-video seamless loop solution");
+      console.log("[SAFARI] Using blended static fallback during video resets");
   
-      // Disable native loop completely on main video
+      // Disable native loop - we handle it manually
       bg.loop = false;
       bg.removeAttribute("loop");
       
-      // Create second video for seamless handoff
-      const bg2 = document.createElement("video");
-      bg2.id = "bgVideo2";
-      bg2.src = bg.src;
-      bg2.muted = true;
-      bg2.playsInline = true;
-      bg2.preload = "auto";
-      bg2.crossOrigin = "anonymous";
+      // Create blended static background canvas
+      const staticCanvas = document.createElement("canvas");
+      staticCanvas.id = "safariStaticFallback";
+      staticCanvas.style.position = "fixed";
+      staticCanvas.style.top = "0";
+      staticCanvas.style.left = "0";
+      staticCanvas.style.width = "100vw";
+      staticCanvas.style.height = "100vh";
+      staticCanvas.style.objectFit = "cover";
+      staticCanvas.style.zIndex = parseInt(getComputedStyle(bg).zIndex || "-1") - 1;
+      staticCanvas.style.display = "none"; // Hidden by default
       
-      // Copy all styling from original video
-      bg2.style.cssText = bg.style.cssText;
-      bg2.style.opacity = "0"; // Start hidden
-      bg2.style.zIndex = parseInt(getComputedStyle(bg).zIndex || "0") - 1;
+      // Insert canvas behind the video
+      bg.parentNode.insertBefore(staticCanvas, bg);
       
-      // Insert second video right after the first
-      bg.parentNode.insertBefore(bg2, bg.nextSibling);
+      let safariResetInProgress = false;
+      let blendedBackgroundReady = false;
       
-      let activeVideo = bg;
-      let standbyVideo = bg2;
-      let safariSwitchInProgress = false;
-      
-      // Preload both videos
-      const preloadBoth = async () => {
+      // Create blended first+last frame background
+      const createBlendedFallback = async () => {
+        if (blendedBackgroundReady || !bg || bg.readyState < 2 || bg.videoWidth === 0) {
+          return;
+        }
+        
         try {
-          await Promise.all([
-            bg.load(),
-            bg2.load()
-          ]);
-          console.log("[SAFARI] Both videos preloaded");
+          console.log("[SAFARI] Creating blended first+last frame fallback");
+          
+          staticCanvas.width = bg.videoWidth;
+          staticCanvas.height = bg.videoHeight;
+          const ctx = staticCanvas.getContext("2d");
+          
+          // Store current position
+          const originalTime = bg.currentTime;
+          
+          // Capture first frame
+          bg.currentTime = 0.1;
+          await new Promise(resolve => {
+            const onSeeked = () => {
+              bg.removeEventListener('seeked', onSeeked);
+              resolve();
+            };
+            bg.addEventListener('seeked', onSeeked);
+          });
+          
+          const tempCanvas = document.createElement("canvas");
+          tempCanvas.width = bg.videoWidth;
+          tempCanvas.height = bg.videoHeight;
+          const tempCtx = tempCanvas.getContext("2d");
+          
+          // Draw first frame
+          tempCtx.drawImage(bg, 0, 0);
+          const firstFrameData = tempCtx.getImageData(0, 0, staticCanvas.width, staticCanvas.height);
+          
+          // Capture last frame
+          bg.currentTime = Math.max(0, bg.duration - 0.5);
+          await new Promise(resolve => {
+            const onSeeked = () => {
+              bg.removeEventListener('seeked', onSeeked);
+              resolve();
+            };
+            bg.addEventListener('seeked', onSeeked);
+          });
+          
+          // Draw last frame
+          tempCtx.drawImage(bg, 0, 0);
+          const lastFrameData = tempCtx.getImageData(0, 0, staticCanvas.width, staticCanvas.height);
+          
+          // Blend frames (50/50 mix)
+          const blendedData = ctx.createImageData(staticCanvas.width, staticCanvas.height);
+          const firstPixels = firstFrameData.data;
+          const lastPixels = lastFrameData.data;
+          const blendedPixels = blendedData.data;
+          
+          for (let i = 0; i < firstPixels.length; i += 4) {
+            blendedPixels[i] = Math.round((firstPixels[i] + lastPixels[i]) / 2);         // Red
+            blendedPixels[i + 1] = Math.round((firstPixels[i + 1] + lastPixels[i + 1]) / 2); // Green
+            blendedPixels[i + 2] = Math.round((firstPixels[i + 2] + lastPixels[i + 2]) / 2); // Blue
+            blendedPixels[i + 3] = Math.round((firstPixels[i + 3] + lastPixels[i + 3]) / 2); // Alpha
+          }
+          
+          // Draw blended result to static canvas
+          ctx.putImageData(blendedData, 0, 0);
+          
+          // Restore original position and continue playing
+          bg.currentTime = originalTime;
+          blendedBackgroundReady = true;
+          
+          console.log("[SAFARI] Blended fallback background ready");
+          tempCanvas.remove();
+          
         } catch (e) {
-          console.error("[SAFARI] Preload error:", e);
+          console.error("[SAFARI] Failed to create blended fallback:", e);
         }
       };
       
-      preloadBoth();
-      
-      // Seamless video switching function
-      const switchVideos = async () => {
-        if (safariSwitchInProgress) return;
-        safariSwitchInProgress = true;
+      // Safari video reset handler with static fallback
+      const safariResetHandler = () => {
+        if (safariResetInProgress || bg.duration <= 0) return;
         
-        console.log("[SAFARI] Switching videos for seamless loop");
+        const timeLeft = bg.duration - bg.currentTime;
         
-        try {
-          // Start standby video from beginning
-          standbyVideo.currentTime = 0;
-          await standbyVideo.play();
+        // Reset early to avoid Safari's blank screen
+        if (timeLeft <= 1.0) {
+          safariResetInProgress = true;
+          console.log("[SAFARI] Reset triggered - showing static fallback");
           
-          // Quick crossfade
-          standbyVideo.style.opacity = "1";
-          activeVideo.style.opacity = "0";
+          // Show static background BEFORE reset to cover the gap
+          if (blendedBackgroundReady) {
+            staticCanvas.style.display = "block";
+            bg.style.opacity = "0";
+          }
           
-          // Small delay to ensure visual transition
+          // Reset video
+          bg.currentTime = 0;
+          
+          // Brief delay to ensure reset completes
           setTimeout(() => {
-            // Pause and reset the now-hidden video
-            activeVideo.pause();
-            activeVideo.currentTime = 0;
+            // Hide static background and show video again
+            staticCanvas.style.display = "none";
+            bg.style.opacity = "1";
             
-            // Swap references
-            const temp = activeVideo;
-            activeVideo = standbyVideo;
-            standbyVideo = temp;
+            // Ensure video continues playing
+            if (bg.paused) {
+              bg.play().catch(() => {});
+            }
             
-            // Ensure standby is ready for next switch
-            standbyVideo.currentTime = 0;
-            
-            safariSwitchInProgress = false;
-          }, 50);
+            safariResetInProgress = false;
+          }, 100); // Short delay to cover Safari's reset gap
+        }
+      };
+      
+      // Add handlers
+      bg.addEventListener("timeupdate", safariResetHandler);
+      
+      // Create blended background when video is ready
+      bg.addEventListener("loadeddata", createBlendedFallback);
+      bg.addEventListener("canplay", createBlendedFallback);
+      
+      // Emergency backup for ended events
+      bg.addEventListener("ended", () => {
+        if (!safariResetInProgress) {
+          safariResetInProgress = true;
           
-        } catch (e) {
-          console.error("[SAFARI] Video switch error:", e);
-          safariSwitchInProgress = false;
+          // Show static during emergency reset
+          if (blendedBackgroundReady) {
+            staticCanvas.style.display = "block";
+            bg.style.opacity = "0";
+          }
+          
+          bg.currentTime = 0;
+          bg.play().then(() => {
+            // Hide static and show video
+            staticCanvas.style.display = "none";
+            bg.style.opacity = "1";
+            safariResetInProgress = false;
+          }).catch(() => {
+            safariResetInProgress = false;
+          });
         }
-      };
+      });
       
-      // Monitor active video and switch before it ends
-      const safariDualVideoHandler = () => {
-        if (safariSwitchInProgress || activeVideo.duration <= 0) return;
-        
-        const timeLeft = activeVideo.duration - activeVideo.currentTime;
-        
-        // Switch much earlier to avoid any gap (1 second early)
-        if (timeLeft <= 1.0 && timeLeft > 0.8) {
-          switchVideos();
-        }
-      };
-      
-      // Add timeupdate only to the active video initially
-      bg.addEventListener("timeupdate", safariDualVideoHandler);
-      
-      // Handle ended events as backup
-      const handleEnded = (video) => {
-        console.log("[SAFARI] Video ended - emergency switch");
-        if (!safariSwitchInProgress) {
-          switchVideos();
-        }
-      };
-      
-      bg.addEventListener("ended", () => handleEnded(bg));
-      bg2.addEventListener("ended", () => handleEnded(bg2));
-      
-      // Update timeupdate listener when videos switch
-      const originalSwitchVideos = switchVideos;
-      switchVideos = async () => {
-        await originalSwitchVideos();
-        
-        // Move timeupdate listener to new active video
-        bg.removeEventListener("timeupdate", safariDualVideoHandler);
-        bg2.removeEventListener("timeupdate", safariDualVideoHandler);
-        activeVideo.addEventListener("timeupdate", safariDualVideoHandler);
-      };
-      
-      // Handle video quality changes for both videos
+      // Handle video quality changes - recreate blended background
       const originalSetBgVideoVariant = window.setBgVideoVariant || setBgVideoVariant;
       window.setBgVideoVariant = (idx, reason) => {
         const newSrc = videoVariants[idx].src;
         
-        // Update both videos
-        bg.src = newSrc;
-        bg2.src = newSrc;
+        // Mark background as not ready
+        blendedBackgroundReady = false;
         
-        // Reload both
+        // Update video source
+        bg.src = newSrc;
         bg.load();
-        bg2.load();
+        
+        // Recreate blended background when new video loads
+        bg.addEventListener("loadeddata", createBlendedFallback, { once: true });
         
         // Continue with original function logic
         if (originalSetBgVideoVariant) {
           originalSetBgVideoVariant(idx, reason);
         }
         
-        console.log(`[SAFARI] Updated both videos to ${newSrc}`);
+        console.log(`[SAFARI] Updated video to ${newSrc} - will recreate blended fallback`);
       };
       
-      console.log("[SAFARI] Dual-video seamless loop system initialized");
+      console.log("[SAFARI] Video with blended static fallback initialized");
       
     } else {
       // ==================== NON-SAFARI SECTION ====================
