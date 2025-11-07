@@ -1197,61 +1197,108 @@ document.addEventListener("DOMContentLoaded", () => {
         attemptGeneration();
       };
       
-      // Enhanced fallback with blending
+      // Enhanced fallback with texture-preserving multi-frame blending
       const generateEnhancedFallback = async () => {
         if (!bg || bg.readyState < 2) return;
         
         try {
-          console.log("[SAFARI] Generating enhanced blended fallback");
+          console.log("[SAFARI] Generating texture-preserving multi-frame fallback");
           
           const originalTime = bg.currentTime;
           const wasPlaying = !bg.paused;
           
-          // Capture first frame
-          bg.currentTime = 0.1;
-          await new Promise(resolve => {
-            const onSeeked = () => {
-              bg.removeEventListener('seeked', onSeeked);
-              resolve();
-            };
-            bg.addEventListener('seeked', onSeeked);
-            setTimeout(resolve, 500);
-          });
+          // Capture 5 key frames throughout the video for better texture preservation
+          const keyFrames = [
+            { time: 0.1, weight: 0.25 },                    // Start frame (high weight)
+            { time: bg.duration * 0.25, weight: 0.15 },    // Quarter frame
+            { time: bg.duration * 0.5, weight: 0.2 },      // Middle frame (medium weight)
+            { time: bg.duration * 0.75, weight: 0.15 },    // Three-quarter frame
+            { time: Math.max(0, bg.duration - 0.5), weight: 0.25 } // End frame (high weight)
+          ];
           
-          const tempCanvas = document.createElement("canvas");
-          tempCanvas.width = bg.videoWidth;
-          tempCanvas.height = bg.videoHeight;
-          const tempCtx = tempCanvas.getContext("2d");
+          const frames = [];
           
-          tempCtx.drawImage(bg, 0, 0);
-          const firstFrameData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+          // Capture all frames
+          for (const keyFrame of keyFrames) {
+            bg.currentTime = keyFrame.time;
+            
+            await new Promise(resolve => {
+              const onSeeked = () => {
+                bg.removeEventListener('seeked', onSeeked);
+                resolve();
+              };
+              bg.addEventListener('seeked', onSeeked);
+              setTimeout(resolve, 400); // Longer timeout for frame stability
+            });
+            
+            const tempCanvas = document.createElement("canvas");
+            tempCanvas.width = bg.videoWidth;
+            tempCanvas.height = bg.videoHeight;
+            const tempCtx = tempCanvas.getContext("2d");
+            tempCtx.drawImage(bg, 0, 0);
+            
+            frames.push({
+              data: tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height),
+              weight: keyFrame.weight
+            });
+            
+            tempCanvas.remove();
+            console.log(`[SAFARI] Captured weighted frame at ${keyFrame.time.toFixed(2)}s (weight: ${keyFrame.weight})`);
+          }
           
-          // Capture last frame
-          bg.currentTime = Math.max(0, bg.duration - 0.5);
-          await new Promise(resolve => {
-            const onSeeked = () => {
-              bg.removeEventListener('seeked', onSeeked);
-              resolve();
-            };
-            bg.addEventListener('seeked', onSeeked);
-            setTimeout(resolve, 500);
-          });
-          
-          tempCtx.drawImage(bg, 0, 0);
-          const lastFrameData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
-          
-          // Blend frames
+          // Create texture-preserving blend
           const ctx = staticCanvas.getContext("2d");
-          const blendedData = ctx.createImageData(tempCanvas.width, tempCanvas.height);
-          const firstPixels = firstFrameData.data;
-          const lastPixels = lastFrameData.data;
+          const blendedData = ctx.createImageData(bg.videoWidth, bg.videoHeight);
           const blendedPixels = blendedData.data;
           
-          for (let i = 0; i < firstPixels.length; i += 4) {
-            blendedPixels[i] = Math.round((firstPixels[i] + lastPixels[i]) / 2);
-            blendedPixels[i + 1] = Math.round((firstPixels[i + 1] + lastPixels[i + 1]) / 2);
-            blendedPixels[i + 2] = Math.round((firstPixels[i + 2] + lastPixels[i + 2]) / 2);
-            blendedPixels[i + 3] = Math.round((firstPixels[i + 3] + lastPixels[i + 3]) / 2);
+          // Weighted blending with texture enhancement
+          for (let pixelIndex = 0; pixelIndex < blendedPixels.length; pixelIndex += 4) {
+            let weightedR = 0, weightedG = 0, weightedB = 0, weightedA = 0;
+            let totalWeight = 0;
+            
+            // Calculate variance to detect texture areas
+            const pixelValues = frames.map(frame => ({
+              r: frame.data.data[pixelIndex],
+              g: frame.data.data[pixelIndex + 1],
+              b: frame.data.data[pixelIndex + 2],
+              weight: frame.weight
+            }));
+            
+            // Calculate color variance (higher variance = more texture detail)
+            const avgR = pixelValues.reduce((sum, p) => sum + p.r, 0) / pixelValues.length;
+            const avgG = pixelValues.reduce((sum, p) => sum + p.g, 0) / pixelValues.length;
+            const avgB = pixelValues.reduce((sum, p) => sum + p.b, 0) / pixelValues.length;
+            
+            const variance = pixelValues.reduce((sum, p) => {
+              return sum + Math.pow(p.r - avgR, 2) + Math.pow(p.g - avgG, 2) + Math.pow(p.b - avgB, 2);
+            }, 0) / pixelValues.length;
+            
+            // Enhance texture areas by giving more weight to frames with interesting detail
+            for (const frame of frames) {
+              let adjustedWeight = frame.weight;
+              
+              // Boost weight for frames that contribute to texture detail
+              if (variance > 200) { // High texture area
+                const frameVariance = Math.pow(frame.data.data[pixelIndex] - avgR, 2) + 
+                                    Math.pow(frame.data.data[pixelIndex + 1] - avgG, 2) + 
+                                    Math.pow(frame.data.data[pixelIndex + 2] - avgB, 2);
+                if (frameVariance > variance * 0.8) {
+                  adjustedWeight *= 1.3; // Boost frames that contribute to texture
+                }
+              }
+              
+              weightedR += frame.data.data[pixelIndex] * adjustedWeight;
+              weightedG += frame.data.data[pixelIndex + 1] * adjustedWeight;
+              weightedB += frame.data.data[pixelIndex + 2] * adjustedWeight;
+              weightedA += frame.data.data[pixelIndex + 3] * adjustedWeight;
+              totalWeight += adjustedWeight;
+            }
+            
+            // Apply weighted average with slight contrast enhancement for texture
+            blendedPixels[pixelIndex] = Math.min(255, Math.max(0, Math.round((weightedR / totalWeight) * 1.05)));
+            blendedPixels[pixelIndex + 1] = Math.min(255, Math.max(0, Math.round((weightedG / totalWeight) * 1.05)));
+            blendedPixels[pixelIndex + 2] = Math.min(255, Math.max(0, Math.round((weightedB / totalWeight) * 1.05)));
+            blendedPixels[pixelIndex + 3] = Math.round(weightedA / totalWeight);
           }
           
           ctx.putImageData(blendedData, 0, 0);
@@ -1269,11 +1316,10 @@ document.addEventListener("DOMContentLoaded", () => {
             bg.play().catch(() => {});
           }
           
-          console.log("[SAFARI] Enhanced blended fallback complete");
-          tempCanvas.remove();
+          console.log("[SAFARI] Texture-preserving multi-frame fallback complete");
           
         } catch (e) {
-          console.error("[SAFARI] Enhanced fallback failed:", e);
+          console.error("[SAFARI] Texture-preserving fallback failed:", e);
         }
       };
       
