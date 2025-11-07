@@ -1516,14 +1516,18 @@ document.addEventListener("DOMContentLoaded", () => {
           this.secondaryVideo.play().then(() => {
             // Fade transition
             this.secondaryVideo.style.opacity = '1';
-            this.mainVideo.style.opacity = '0';
-            
+
             setTimeout(() => {
-              this.mainVideo.pause();
-              this.currentActive = 'secondary';
-              this.switchInProgress = false;
-              console.log('[DUAL VIDEO] Switch to secondary complete');
-            }, 200);
+              this.mainVideo.style.opacity = '0';
+            
+
+              setTimeout(() => {
+                this.mainVideo.pause();
+                this.currentActive = 'secondary';
+                this.switchInProgress = false;
+                console.log('[DUAL VIDEO] Switch to secondary complete');
+              }, 200);
+            }, 50); 
           }).catch(e => {
             console.error('[DUAL VIDEO] Failed to start secondary video:', e);
             this.switchInProgress = false; // Reset flag on error
@@ -1542,14 +1546,17 @@ document.addEventListener("DOMContentLoaded", () => {
           this.mainVideo.play().then(() => {
             // Fade transition
             this.mainVideo.style.opacity = '1';
-            this.secondaryVideo.style.opacity = '0';
-            
             setTimeout(() => {
-              this.secondaryVideo.pause();
-              this.currentActive = 'main';
-              this.switchInProgress = false;
-              console.log('[DUAL VIDEO] Switch to main complete');
-            }, 200);
+              this.secondaryVideo.style.opacity = '0';
+              
+              // After secondary has faded out, pause it and finalize the switch
+              setTimeout(() => {
+                this.secondaryVideo.pause();
+                this.currentActive = 'main';
+                this.switchInProgress = false;
+                console.log('[DUAL VIDEO] Switch to main complete');
+              }, 200);
+            }, 50); // Brief delay to ensure main is rendering
           }).catch(e => {
             console.error('[DUAL VIDEO] Failed to start main video:', e);
             this.handleError();
