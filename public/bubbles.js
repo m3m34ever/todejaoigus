@@ -1098,6 +1098,13 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     };
 
+    const update = () => {
+      // No button to update, just ensure video plays
+      if (bg.paused) {
+      bg.play().catch(() => {});
+      }
+    };
+
     // keep visibility in sync with playback state
     ["play","playing","pause","ended","loadeddata","canplay"].forEach(ev => bg.addEventListener(ev, update));
 
@@ -1109,17 +1116,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const onFirstGesture = () => { tryPlay(); window.removeEventListener("pointerdown", onFirstGesture); window.removeEventListener("touchstart", onFirstGesture); };
     window.addEventListener("pointerdown", onFirstGesture, { once: true });
     window.addEventListener("touchstart", onFirstGesture, { once: true });
-
-    // button triggers a user-gesture play attempt
-    btn.addEventListener("click", async () => {
-      try {
-        await bg.play();
-      } catch (e) {
-        alert("Cannot play background due to browser restrictions.");
-      } finally {
-        update();
-      }
-    });
 
     // ==================== SAFARI-ONLY SECTION ====================
     // because safari is broken and cannot handle video loops properly -_-
@@ -1138,14 +1134,14 @@ document.addEventListener("DOMContentLoaded", () => {
       staticCanvas.style.width = "100vw";
       staticCanvas.style.height = "100vh";
       staticCanvas.style.objectFit = "cover";
-      staticCanvas.style.zIndex = parseInt(getComputedStyle(bg).zIndex || "-1") - 1;
-      staticCanvas.style.display = "block"; // ALWAYS visible
+      staticCanvas.style.zIndex = "-2"; // Force behind video
+      staticCanvas.style.display = "block";
       
-      // Set initial background color to match your CSS
+      // Set initial background color
       const ctx = staticCanvas.getContext("2d");
       staticCanvas.width = window.innerWidth;
       staticCanvas.height = window.innerHeight;
-      ctx.fillStyle =   "#313c34";
+      ctx.fillStyle = "#313c34";
       ctx.fillRect(0, 0, staticCanvas.width, staticCanvas.height);
       
       bg.parentNode.insertBefore(staticCanvas, bg);
@@ -1154,11 +1150,10 @@ document.addEventListener("DOMContentLoaded", () => {
       let fallbackCache = new Map();
       let fallbackReady = false;
       
-      // IMMEDIATE fallback generation - no waiting
+      // IMMEDIATE fallback generation
       const generateFallbackImmediately = () => {
         console.log("[SAFARI] Starting immediate fallback generation");
         
-        // Try every 500ms until we succeed
         const attemptGeneration = async () => {
           if (fallbackReady) return;
           
@@ -1175,10 +1170,7 @@ document.addEventListener("DOMContentLoaded", () => {
             staticCanvas.width = bg.videoWidth;
             staticCanvas.height = bg.videoHeight;
             
-            const originalTime = bg.currentTime;
-            const wasPlaying = !bg.paused;
-            
-            // Simple approach: just capture current frame (likely first frame)
+            // Simple approach: capture current frame
             const ctx = staticCanvas.getContext("2d");
             ctx.drawImage(bg, 0, 0);
             
@@ -1193,7 +1185,7 @@ document.addEventListener("DOMContentLoaded", () => {
             fallbackReady = true;
             console.log("[SAFARI] Simple fallback generated and cached");
             
-            // Now try the enhanced version with blending
+            // Enhanced version with blending
             setTimeout(generateEnhancedFallback, 1000);
             
           } catch (e) {
@@ -1205,7 +1197,7 @@ document.addEventListener("DOMContentLoaded", () => {
         attemptGeneration();
       };
       
-      // Enhanced fallback with first+last frame blending
+      // Enhanced fallback with blending
       const generateEnhancedFallback = async () => {
         if (!bg || bg.readyState < 2) return;
         
@@ -1264,7 +1256,7 @@ document.addEventListener("DOMContentLoaded", () => {
           
           ctx.putImageData(blendedData, 0, 0);
           
-          // Update cache with enhanced version
+          // Update cache
           fallbackCache.set(bg.src, {
             imageData: blendedData,
             width: staticCanvas.width,
@@ -1292,7 +1284,7 @@ document.addEventListener("DOMContentLoaded", () => {
       bg.addEventListener("loadeddata", generateFallbackImmediately);
       bg.addEventListener("canplay", generateFallbackImmediately);
       
-      // Safari reset handler - video switches between canvas and video
+      // Safari reset handler
       const safariResetHandler = () => {
         if (safariResetInProgress || bg.duration <= 0) return;
         
@@ -1302,7 +1294,7 @@ document.addEventListener("DOMContentLoaded", () => {
           safariResetInProgress = true;
           console.log("[SAFARI] Reset triggered - video opacity to 0");
           
-          // Just hide video - canvas is always visible underneath
+          // Hide video - canvas shows underneath
           bg.style.opacity = "0";
           bg.currentTime = 0;
           
@@ -1330,7 +1322,7 @@ document.addEventListener("DOMContentLoaded", () => {
         bg.src = newSrc;
         bg.load();
         
-        // Check if we have this cached, otherwise regenerate
+        // Check cache
         if (fallbackCache.has(newSrc)) {
           const cached = fallbackCache.get(newSrc);
           staticCanvas.width = cached.width;
