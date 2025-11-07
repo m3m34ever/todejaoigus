@@ -1509,7 +1509,7 @@ document.addEventListener("DOMContentLoaded", () => {
           if (this.switchInProgress || this.currentActive === 'secondary') return;
           
           this.switchInProgress = true;
-          console.log('[DUAL VIDEO] True blend-mode switch to secondary');
+          console.log('[DUAL VIDEO] Averaging blend switch to secondary');
           
           if (this.secondaryVideo.readyState < 2) {
             console.warn('[DUAL VIDEO] Secondary not ready, forcing load');
@@ -1520,32 +1520,37 @@ document.addEventListener("DOMContentLoaded", () => {
           this.secondaryVideo.currentTime = 0;
           this.secondaryVideo.play().then(() => {
             
-            // TRUE BLEND MODE APPROACH - videos actually mix together
+            // AVERAGING BLEND APPROACH - maintains brightness
             
-            // Step 1: Set blend mode on secondary video
-            this.secondaryVideo.style.mixBlendMode = 'normal'; // or 'screen', 'multiply', 'overlay'
-            this.secondaryVideo.style.opacity = '1';
+            // Step 1: Show secondary at 50% opacity (creates 50/50 average with main)
+            this.secondaryVideo.style.mixBlendMode = 'normal';
+            this.secondaryVideo.style.opacity = '0.5';
             
-            // Step 2: Brief blend period where both videos are visible and mixing
+            // Step 2: Reduce main video opacity to create proper averaging
             setTimeout(() => {
-              // Optional: Change blend mode for transition effect
-              this.secondaryVideo.style.mixBlendMode = 'screen'; // Brightens the blend
+              this.mainVideo.style.opacity = '0.5';
               
+              // Brief averaging period - both videos at 50% = proper average
               setTimeout(() => {
-                // Step 3: Hide main video and reset secondary to normal
-                this.mainVideo.style.opacity = '0';
+                // Step 3: Gradually shift the balance
+                this.secondaryVideo.style.opacity = '0.75';
+                this.mainVideo.style.opacity = '0.25';
                 
                 setTimeout(() => {
-                  // Step 4: Reset blend mode and finalize
-                  this.secondaryVideo.style.mixBlendMode = 'normal';
-                  this.mainVideo.pause();
-                  this.currentActive = 'secondary';
-                  this.switchInProgress = false;
-                  console.log('[DUAL VIDEO] True blend transition complete');
-                }, 50); // Brief delay for blend effect
-                
-              }, 100); // Blend duration
-            }, 50); // Initial blend delay
+                  // Step 4: Complete the transition
+                  this.secondaryVideo.style.opacity = '1';
+                  this.mainVideo.style.opacity = '0';
+                  
+                  setTimeout(() => {
+                    this.mainVideo.pause();
+                    this.currentActive = 'secondary';
+                    this.switchInProgress = false;
+                    console.log('[DUAL VIDEO] Averaging blend transition complete');
+                  }, 50);
+                  
+                }, 50); // Gradual shift
+              }, 100); // Averaging period
+            }, 50); // Initial delay
             
           }).catch(e => {
             console.error('[DUAL VIDEO] Failed to start secondary video:', e);
@@ -1558,37 +1563,42 @@ document.addEventListener("DOMContentLoaded", () => {
           if (this.switchInProgress || this.currentActive === 'main') return;
           
           this.switchInProgress = true;
-          console.log('[DUAL VIDEO] True blend-mode switch to main');
+          console.log('[DUAL VIDEO] Averaging blend switch to main');
           
           // Start main video from beginning
           this.mainVideo.currentTime = 0;
           this.mainVideo.play().then(() => {
             
-            // TRUE BLEND MODE APPROACH
+            // AVERAGING BLEND APPROACH - maintains brightness
             
-            // Step 1: Set blend mode on main video
+            // Step 1: Show main at 50% opacity (creates 50/50 average with secondary)
             this.mainVideo.style.mixBlendMode = 'normal';
-            this.mainVideo.style.opacity = '1';
+            this.mainVideo.style.opacity = '0.5';
             
-            // Step 2: Brief blend period
+            // Step 2: Reduce secondary opacity to create proper averaging
             setTimeout(() => {
-              // Optional transition blend mode
-              this.mainVideo.style.mixBlendMode = 'screen'; // Brightens
+              this.secondaryVideo.style.opacity = '0.5';
               
+              // Brief averaging period - both videos at 50% = proper average
               setTimeout(() => {
-                // Step 3: Hide secondary video
-                this.secondaryVideo.style.opacity = '0';
+                // Step 3: Gradually shift the balance
+                this.mainVideo.style.opacity = '0.75';
+                this.secondaryVideo.style.opacity = '0.25';
                 
                 setTimeout(() => {
-                  // Step 4: Reset and finalize
-                  this.mainVideo.style.mixBlendMode = 'normal';
-                  this.secondaryVideo.pause();
-                  this.currentActive = 'main';
-                  this.switchInProgress = false;
-                  console.log('[DUAL VIDEO] True blend transition complete');
-                }, 50);
-                
-              }, 100); // Blend duration
+                  // Step 4: Complete the transition
+                  this.mainVideo.style.opacity = '1';
+                  this.secondaryVideo.style.opacity = '0';
+                  
+                  setTimeout(() => {
+                    this.secondaryVideo.pause();
+                    this.currentActive = 'main';
+                    this.switchInProgress = false;
+                    console.log('[DUAL VIDEO] Averaging blend transition complete');
+                  }, 50);
+                  
+                }, 50); // Gradual shift
+              }, 100); // Averaging period
             }, 50); // Initial delay
             
           }).catch(e => {
