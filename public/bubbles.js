@@ -1151,7 +1151,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // because safari is broken and cannot handle video loops properly -_-
     if (isSafari) {
       console.log("[SAFARI] Using blended static fallback during video resets");
-  
+
       // Disable native loop - we handle it manually
       bg.loop = false;
       bg.removeAttribute("loop");
@@ -1173,22 +1173,49 @@ document.addEventListener("DOMContentLoaded", () => {
       
       let safariResetInProgress = false;
       let blendedBackgroundReady = false;
+      let fallbackCreationInProgress = false;
       
-      // Create blended first+last frame background
-      const createBlendedFallback = async () => {
+      // Create a simple first-frame fallback immediately
+      const createImmediateFallback = () => {
         if (blendedBackgroundReady || !bg || bg.readyState < 2 || bg.videoWidth === 0) {
           return;
         }
         
         try {
-          console.log("[SAFARI] Creating blended first+last frame fallback");
+          console.log("[SAFARI] Creating immediate first-frame fallback");
           
           staticCanvas.width = bg.videoWidth;
           staticCanvas.height = bg.videoHeight;
           const ctx = staticCanvas.getContext("2d");
           
+          // Draw current frame (should be first frame)
+          ctx.drawImage(bg, 0, 0);
+          blendedBackgroundReady = true; // Mark as ready immediately
+          
+          console.log("[SAFARI] Immediate fallback ready");
+          
+          // Now try to create the better blended version in background
+          setTimeout(createBlendedFallback, 100);
+          
+        } catch (e) {
+          console.error("[SAFARI] Immediate fallback creation failed:", e);
+        }
+      };
+      
+      // Create blended first+last frame background (enhanced version)
+      const createBlendedFallback = async () => {
+        if (fallbackCreationInProgress || !bg || bg.readyState < 2 || bg.videoWidth === 0) {
+          return;
+        }
+        
+        fallbackCreationInProgress = true;
+        
+        try {
+          console.log("[SAFARI] Creating enhanced blended first+last frame fallback");
+          
           // Store current position
           const originalTime = bg.currentTime;
+          const wasPlaying = !bg.paused;
           
           // Capture first frame
           bg.currentTime = 0.1;
@@ -1198,6 +1225,7 @@ document.addEventListener("DOMContentLoaded", () => {
               resolve();
             };
             bg.addEventListener('seeked', onSeeked);
+            setTimeout(resolve, 500); // Fallback timeout
           });
           
           const tempCanvas = document.createElement("canvas");
@@ -1217,6 +1245,7 @@ document.addEventListener("DOMContentLoaded", () => {
               resolve();
             };
             bg.addEventListener('seeked', onSeeked);
+            setTimeout(resolve, 500); // Fallback timeout
           });
           
           // Draw last frame
@@ -1224,6 +1253,7 @@ document.addEventListener("DOMContentLoaded", () => {
           const lastFrameData = tempCtx.getImageData(0, 0, staticCanvas.width, staticCanvas.height);
           
           // Blend frames (50/50 mix)
+          const ctx = staticCanvas.getContext("2d");
           const blendedData = ctx.createImageData(staticCanvas.width, staticCanvas.height);
           const firstPixels = firstFrameData.data;
           const lastPixels = lastFrameData.data;
@@ -1239,15 +1269,19 @@ document.addEventListener("DOMContentLoaded", () => {
           // Draw blended result to static canvas
           ctx.putImageData(blendedData, 0, 0);
           
-          // Restore original position and continue playing
+          // Restore original position and playback state
           bg.currentTime = originalTime;
-          blendedBackgroundReady = true;
+          if (wasPlaying && bg.paused) {
+            bg.play().catch(() => {});
+          }
           
-          console.log("[SAFARI] Blended fallback background ready");
+          console.log("[SAFARI] Enhanced blended fallback ready");
           tempCanvas.remove();
           
         } catch (e) {
-          console.error("[SAFARI] Failed to create blended fallback:", e);
+          console.error("[SAFARI] Enhanced blending failed:", e);
+        } finally {
+          fallbackCreationInProgress = false;
         }
       };
       
@@ -1262,10 +1296,18 @@ document.addEventListener("DOMContentLoaded", () => {
           safariResetInProgress = true;
           console.log("[SAFARI] Reset triggered - showing static fallback");
           
-          // Show static background BEFORE reset to cover the gap
+          // ALWAYS show static background BEFORE reset (even if not perfect)
           if (blendedBackgroundReady) {
             staticCanvas.style.display = "block";
             bg.style.opacity = "0";
+          } else {
+            // Emergency: create immediate fallback if none exists
+            console.log("[SAFARI] No fallback ready - creating emergency fallback");
+            createImmediateFallback();
+            if (blendedBackgroundReady) {
+              staticCanvas.style.display = "block";
+              bg.style.opacity = "0";
+            }
           }
           
           // Reset video
@@ -1283,16 +1325,26 @@ document.addEventListener("DOMContentLoaded", () => {
             }
             
             safariResetInProgress = false;
-          }, 100); // Short delay to cover Safari's reset gap
+          }, 150); // Slightly longer delay
         }
       };
       
       // Add handlers
       bg.addEventListener("timeupdate", safariResetHandler);
       
-      // Create blended background when video is ready
-      bg.addEventListener("loadeddata", createBlendedFallback);
-      bg.addEventListener("canplay", createBlendedFallback);
+      // Create immediate fallback as soon as video is ready
+      bg.addEventListener("loadeddata", createImmediateFallback);
+      bg.addEventListener("canplay", createImmediateFallback);
+      
+      // Also try on first frame
+      bg.addEventListener("loadstart", () => {
+        // Try to create fallback once video starts loading
+        setTimeout(() => {
+          if (!blendedBackgroundReady) {
+            createImmediateFallback();
+          }
+        }, 200);
+      });
       
       // Emergency backup for ended events
       bg.addEventListener("ended", () => {
@@ -1324,23 +1376,24 @@ document.addEventListener("DOMContentLoaded", () => {
         
         // Mark background as not ready
         blendedBackgroundReady = false;
+        fallbackCreationInProgress = false;
         
         // Update video source
         bg.src = newSrc;
         bg.load();
         
-        // Recreate blended background when new video loads
-        bg.addEventListener("loadeddata", createBlendedFallback, { once: true });
+        // Recreate immediate fallback when new video loads
+        bg.addEventListener("loadeddata", createImmediateFallback, { once: true });
         
         // Continue with original function logic
         if (originalSetBgVideoVariant) {
           originalSetBgVideoVariant(idx, reason);
         }
         
-        console.log(`[SAFARI] Updated video to ${newSrc} - will recreate blended fallback`);
+        console.log(`[SAFARI] Updated video to ${newSrc} - will recreate fallback`);
       };
       
-      console.log("[SAFARI] Video with blended static fallback initialized");
+      console.log("[SAFARI] Video with immediate + blended static fallback initialized");
       
     } else {
       // ==================== NON-SAFARI SECTION ====================
