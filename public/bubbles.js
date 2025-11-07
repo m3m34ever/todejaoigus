@@ -528,6 +528,65 @@ function updateCircleStyles(){
   } catch (e) { /* non-critical */ }
 }
 
+// comprehensive safari detection
+function detectSafari() {
+  // Method 1: Feature detection for video issues
+  const testVideo = document.createElement('video');
+  testVideo.muted = true;
+  testVideo.style.display = 'none';
+  
+  const videoIndicators = [
+    'webkitPlaysinline' in testVideo,
+    !('requestPictureInPicture' in testVideo),
+    typeof testVideo.requestVideoFrameCallback !== 'function'
+  ].filter(Boolean).length;
+  
+  testVideo.remove();
+  
+  // Method 2: Check for Safari-specific globals
+  const hasWebkitGlobals = !!(
+    window.webkitURL || 
+    window.webkitRequestAnimationFrame ||
+    (window.safari && window.safari.pushNotification)
+  );
+  
+  // Method 3: Check for Safari's unique audio context behavior
+  const hasWebkitAudio = !!(
+    window.webkitAudioContext && 
+    !window.AudioContext
+  );
+  
+  // Method 4: User agent as fallback (cleaned up)
+  const userAgentSafari = /^((?!chrome|android|crios|fxios).)*safari/i.test(navigator.userAgent);
+  
+  // Method 5: Check for Safari's unique touch behavior (mobile)
+  const hasWebkitTouch = 'ontouchforcechange' in window;
+  
+  // Calculate confidence score
+  const indicators = [
+    videoIndicators >= 2,
+    hasWebkitGlobals,
+    hasWebkitAudio,
+    userAgentSafari,
+    hasWebkitTouch
+  ].filter(Boolean).length;
+  
+  const isSafari = indicators >= 2; // Need at least 2 indicators
+  
+  if (isSafari) {
+    console.log(`[SAFARI DETECTION] Detected Safari with ${indicators}/5 indicators:`, {
+      videoFeatures: videoIndicators >= 2,
+      webkitGlobals: hasWebkitGlobals,
+      webkitAudio: hasWebkitAudio,
+      userAgent: userAgentSafari,
+      touchForce: hasWebkitTouch
+    });
+  }
+  
+  return isSafari;
+}
+
+
 function centerCircle() {
   const vminPx = Math.min(window.innerWidth, window.innerHeight) / 100;
   const sizePx = circleState.sizeVmin * vminPx;
@@ -1022,8 +1081,8 @@ document.addEventListener("DOMContentLoaded", () => {
     // Set video source FIRST
     if (!bg.src) bg.src = videoVariants[currentBgVariant].src;
     
-    // Safari detection at the very top
-    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+
+    const isSafari = detectSafari();
     
     // ensure muted to maximize autoplay chance
     try { bg.muted = true; } catch (e) { /* ignore */ }
