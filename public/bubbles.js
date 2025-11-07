@@ -1424,7 +1424,8 @@ document.addEventListener("DOMContentLoaded", () => {
           this.secondaryVideo.style.objectFit = 'cover';
           this.secondaryVideo.style.zIndex = this.mainVideo.style.zIndex || '-1';
           this.secondaryVideo.style.opacity = '0';
-          this.secondaryVideo.style.transition = 'opacity 0.2s ease-in-out';
+          this.secondaryVideo.style.mixBlendMode = 'normal';
+          this.secondaryVideo.style.transition = 'none';
           
           // Insert secondary video next to main video
           this.mainVideo.parentNode.insertBefore(this.secondaryVideo, this.mainVideo.nextSibling);
@@ -1432,11 +1433,13 @@ document.addEventListener("DOMContentLoaded", () => {
           // Disable native loop on both videos
           this.mainVideo.loop = false;
           this.secondaryVideo.loop = false;
+
+          this.mainVideo.style.mixBlendMode = 'normal';
           
           this.setupEventListeners();
           this.isActive = true;
           
-          console.log('[DUAL VIDEO] Secondary video created and positioned');
+          console.log('[DUAL VIDEO] Blend mode secondary video created and positioned');
         }
         
         setupEventListeners() {
@@ -1506,65 +1509,97 @@ document.addEventListener("DOMContentLoaded", () => {
           if (this.switchInProgress || this.currentActive === 'secondary') return;
           
           this.switchInProgress = true;
-          console.log('[DUAL VIDEO] Switching to secondary video');
+          console.log('[DUAL VIDEO] True blend-mode switch to secondary');
+          
           if (this.secondaryVideo.readyState < 2) {
             console.warn('[DUAL VIDEO] Secondary not ready, forcing load');
             this.secondaryVideo.load();
           }
+          
           // Start secondary video from beginning
           this.secondaryVideo.currentTime = 0;
           this.secondaryVideo.play().then(() => {
-            // Fade transition
-            this.secondaryVideo.style.opacity = '1';
-
-            setTimeout(() => {
-              this.mainVideo.style.opacity = '0';
             
-
+            // TRUE BLEND MODE APPROACH - videos actually mix together
+            
+            // Step 1: Set blend mode on secondary video
+            this.secondaryVideo.style.mixBlendMode = 'normal'; // or 'screen', 'multiply', 'overlay'
+            this.secondaryVideo.style.opacity = '1';
+            
+            // Step 2: Brief blend period where both videos are visible and mixing
+            setTimeout(() => {
+              // Optional: Change blend mode for transition effect
+              this.secondaryVideo.style.mixBlendMode = 'screen'; // Brightens the blend
+              
               setTimeout(() => {
-                this.mainVideo.pause();
-                this.currentActive = 'secondary';
-                this.switchInProgress = false;
-                console.log('[DUAL VIDEO] Switch to secondary complete');
-              }, 200);
-            }, 50); 
+                // Step 3: Hide main video and reset secondary to normal
+                this.mainVideo.style.opacity = '0';
+                
+                setTimeout(() => {
+                  // Step 4: Reset blend mode and finalize
+                  this.secondaryVideo.style.mixBlendMode = 'normal';
+                  this.mainVideo.pause();
+                  this.currentActive = 'secondary';
+                  this.switchInProgress = false;
+                  console.log('[DUAL VIDEO] True blend transition complete');
+                }, 50); // Brief delay for blend effect
+                
+              }, 100); // Blend duration
+            }, 50); // Initial blend delay
+            
           }).catch(e => {
             console.error('[DUAL VIDEO] Failed to start secondary video:', e);
-            this.switchInProgress = false; // Reset flag on error
+            this.switchInProgress = false;
             this.handleError();
           });
         }
-        
+
         switchToMain() {
           if (this.switchInProgress || this.currentActive === 'main') return;
           
           this.switchInProgress = true;
-          console.log('[DUAL VIDEO] Switching to main video');
+          console.log('[DUAL VIDEO] True blend-mode switch to main');
           
           // Start main video from beginning
           this.mainVideo.currentTime = 0;
           this.mainVideo.play().then(() => {
-            // Fade transition
+            
+            // TRUE BLEND MODE APPROACH
+            
+            // Step 1: Set blend mode on main video
+            this.mainVideo.style.mixBlendMode = 'normal';
             this.mainVideo.style.opacity = '1';
+            
+            // Step 2: Brief blend period
             setTimeout(() => {
-              this.secondaryVideo.style.opacity = '0';
+              // Optional transition blend mode
+              this.mainVideo.style.mixBlendMode = 'screen'; // Brightens
               
-              // After secondary has faded out, pause it and finalize the switch
               setTimeout(() => {
-                this.secondaryVideo.pause();
-                this.currentActive = 'main';
-                this.switchInProgress = false;
-                console.log('[DUAL VIDEO] Switch to main complete');
-              }, 200);
-            }, 50); // Brief delay to ensure main is rendering
+                // Step 3: Hide secondary video
+                this.secondaryVideo.style.opacity = '0';
+                
+                setTimeout(() => {
+                  // Step 4: Reset and finalize
+                  this.mainVideo.style.mixBlendMode = 'normal';
+                  this.secondaryVideo.pause();
+                  this.currentActive = 'main';
+                  this.switchInProgress = false;
+                  console.log('[DUAL VIDEO] True blend transition complete');
+                }, 50);
+                
+              }, 100); // Blend duration
+            }, 50); // Initial delay
+            
           }).catch(e => {
             console.error('[DUAL VIDEO] Failed to start main video:', e);
+            this.switchInProgress = false;
             this.handleError();
           });
         }
         
         updateSources(newSrc) {
-          console.log(`[DUAL VIDEO] Updating sources to ${newSrc}`);
+          console.log(`[DUAL VIDEO] Updating blend-mode sources to ${newSrc}`);
           
           const wasPlaying = !this.mainVideo.paused || !this.secondaryVideo.paused;
           
@@ -1576,6 +1611,10 @@ document.addEventListener("DOMContentLoaded", () => {
           this.currentActive = 'main';
           this.mainVideo.style.opacity = '1';
           this.secondaryVideo.style.opacity = '0';
+          
+          // Reset blend modes
+          this.mainVideo.style.mixBlendMode = 'normal';
+          this.secondaryVideo.style.mixBlendMode = 'normal';
           
           // Load both videos
           this.mainVideo.load();
@@ -1589,7 +1628,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         
         handleError() {
-          console.error('[DUAL VIDEO] Error occurred, falling back to single video');
+          console.error('[DUAL VIDEO] Blend-mode error occurred, falling back to single video');
           this.destroy();
           
           // Trigger performance downgrade
@@ -1599,13 +1638,14 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         
         destroy() {
-          console.log('[DUAL VIDEO] Destroying dual video system');
+          console.log('[DUAL VIDEO] Destroying blend-mode dual video system');
           
           this.isActive = false;
           
           // Restore main video
           this.mainVideo.style.opacity = '1';
           this.mainVideo.style.transition = '';
+          this.mainVideo.style.mixBlendMode = 'normal';
           this.mainVideo.loop = true;
           
           // Remove secondary video
