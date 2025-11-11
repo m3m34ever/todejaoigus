@@ -1081,6 +1081,9 @@ document.addEventListener("DOMContentLoaded", () => {
     // Set video source FIRST
     if (!bg.src) bg.src = videoVariants[currentBgVariant].src;
     
+    let dualVideoSystem = null;
+    let staticCanvas = null;
+    let fallbackCache = null;
 
     const isSafari = detectSafari();
     
@@ -1126,7 +1129,7 @@ document.addEventListener("DOMContentLoaded", () => {
       bg.removeAttribute("loop");
       
       // Create canvas that's ALWAYS visible as background layer
-      const staticCanvas = document.createElement("canvas");
+      staticCanvas = document.createElement("canvas");
       staticCanvas.id = "safariStaticFallback";
       staticCanvas.style.position = "fixed";
       staticCanvas.style.top = "0";
@@ -1147,7 +1150,7 @@ document.addEventListener("DOMContentLoaded", () => {
       bg.parentNode.insertBefore(staticCanvas, bg);
       
       let safariResetInProgress = false;
-      let fallbackCache = new Map();
+      fallbackCache = new Map();
       let fallbackReady = false;
       
       // IMMEDIATE fallback generation
@@ -1459,49 +1462,49 @@ document.addEventListener("DOMContentLoaded", () => {
         
         setupEventListeners() {
           // Main video timeupdate
-          this.mainVideo.addEventListener('timeupdate', () => {
+          this.mainTimeUpdateHandler = () => {
             if (!this.isActive || this.switchInProgress) return;
             
             const timeLeft = this.mainVideo.duration - this.mainVideo.currentTime;
             
-            // Preload secondary video
             if (timeLeft <= this.preloadBuffer && this.currentActive === 'main') {
               this.preloadSecondary();
             }
             
-            // Switch to secondary
             if (timeLeft <= this.switchBuffer && this.currentActive === 'main') {
               this.switchToSecondary();
             }
-          });
+          };
           
-          // Secondary video timeupdate
-          this.secondaryVideo.addEventListener('timeupdate', () => {
+          this.secondaryTimeUpdateHandler = () => {
             if (!this.isActive || this.switchInProgress) return;
             
             const timeLeft = this.secondaryVideo.duration - this.secondaryVideo.currentTime;
             
-            // Preload main video
             if (timeLeft <= this.preloadBuffer && this.currentActive === 'secondary') {
               this.preloadMain();
             }
             
-            // Switch to main
             if (timeLeft <= this.switchBuffer && this.currentActive === 'secondary') {
               this.switchToMain();
             }
-          });
+          };
           
-          // Error handlers
-          this.mainVideo.addEventListener('error', (e) => {
+          this.mainErrorHandler = (e) => {
             console.error('[DUAL VIDEO] Main video error:', e);
             this.handleError();
-          });
+          };
           
-          this.secondaryVideo.addEventListener('error', (e) => {
+          this.secondaryErrorHandler = (e) => {
             console.error('[DUAL VIDEO] Secondary video error:', e);
             this.handleError();
-          });
+          };
+          
+          // Add all event listeners
+          this.mainVideo.addEventListener('timeupdate', this.mainTimeUpdateHandler);
+          this.mainVideo.addEventListener('error', this.mainErrorHandler);
+          this.secondaryVideo.addEventListener('timeupdate', this.secondaryTimeUpdateHandler);
+          this.secondaryVideo.addEventListener('error', this.secondaryErrorHandler);
         }
         
         preloadSecondary() {
@@ -1682,20 +1685,48 @@ document.addEventListener("DOMContentLoaded", () => {
           console.log('[DUAL VIDEO] Destroying blend-mode dual video system');
           
           this.isActive = false;
+          this.switchInProgress = false;
           
-          // Restore main video
-          this.mainVideo.style.opacity = '1';
-          this.mainVideo.style.transition = '';
-          this.mainVideo.style.mixBlendMode = 'normal';
-          this.mainVideo.loop = true;
-          
-          // Remove secondary video
-          if (this.secondaryVideo && this.secondaryVideo.parentNode) {
-            this.secondaryVideo.parentNode.removeChild(this.secondaryVideo);
+          // Remove all event listeners
+          if (this.mainVideo && this.mainTimeUpdateHandler) {
+            this.mainVideo.removeEventListener('timeupdate', this.mainTimeUpdateHandler);
+            this.mainVideo.removeEventListener('error', this.mainErrorHandler);
           }
           
+          if (this.secondaryVideo && this.secondaryTimeUpdateHandler) {
+            this.secondaryVideo.removeEventListener('timeupdate', this.secondaryTimeUpdateHandler);
+            this.secondaryVideo.removeEventListener('error', this.secondaryErrorHandler);
+            
+            // Force cleanup
+            this.secondaryVideo.pause();
+            this.secondaryVideo.src = '';
+            this.secondaryVideo.load();
+            
+            if (this.secondaryVideo.parentNode) {
+              this.secondaryVideo.parentNode.removeChild(this.secondaryVideo);
+            }
+          }
+          
+          // Restore main video
+          if (this.mainVideo) {
+            this.mainVideo.style.opacity = '1';
+            this.mainVideo.style.transition = '';
+            this.mainVideo.style.mixBlendMode = 'normal';
+            this.mainVideo.style.zIndex = '';
+            this.mainVideo.loop = true;
+          }
+          
+          // Clear references
+          this.mainTimeUpdateHandler = null;
+          this.secondaryTimeUpdateHandler = null;
+          this.mainErrorHandler = null;
+          this.secondaryErrorHandler = null;
           this.secondaryVideo = null;
+          this.mainVideo = null;
+          
           currentVideoMode = 'single';
+          
+          console.log('[DUAL VIDEO] Cleanup complete');
         }
       }
       
@@ -1710,11 +1741,19 @@ document.addEventListener("DOMContentLoaded", () => {
         let lastTotal = 0;
         let lastDropped = 0;
         let samples = [];
+        const maxSamples = 10; // limit sample history to prevent mem buildup
         const minSamplesBeforeDowngrade = 5;
         let monitorStarted = false;
         
         const monitorInterval = setInterval(() => {
-          if (!bg || bg.paused || bg.ended) return;
+          if (!bg || !bg.parentNode || bg.paused || bg.ended) {
+            console.log("[DUAL VIDEO] Background video not active, skipping performance check");
+            clearInterval(monitorInterval);
+            if (window._performanceMonitorInterval === monitorInterval) {
+              window._performanceMonitorInterval = null;
+            }
+            return;
+          }
           if (!monitorStarted && bg.readyState >= 2) monitorStarted = true;
           if (!monitorStarted) return;
           
@@ -1724,7 +1763,8 @@ document.addEventListener("DOMContentLoaded", () => {
             const dropped = q.droppedVideoFrames || 0;
             const totalDelta = total - lastTotal;
             const droppedDelta = dropped - lastDropped;
-            lastTotal = total; lastDropped = dropped;
+            lastTotal = total; 
+            lastDropped = dropped;
             
             if (totalDelta > 0) {
               const fps = totalDelta / 3;
@@ -1734,6 +1774,11 @@ document.addEventListener("DOMContentLoaded", () => {
               
               console.log(`[DUAL VIDEO] FPS: ${fps.toFixed(1)}, Drop ratio: ${(dropRatio*100).toFixed(1)}%, Mode: ${currentVideoMode}, Samples: ${samples.length}/${minSamplesBeforeDowngrade}`);
               
+              // Limit samples array size to prevent memory growth
+              if (samples.length > maxSamples) {
+                samples = samples.slice(-maxSamples);
+              }
+
               if (samples.length >= minSamplesBeforeDowngrade) {
                 const avgFps = samples.reduce((sum, s) => sum + s.fps, 0) / samples.length;
                 const avgDropRatio = samples.reduce((sum, s) => sum + s.dropRatio, 0) / samples.length;
@@ -1761,7 +1806,9 @@ document.addEventListener("DOMContentLoaded", () => {
             console.error("[DUAL VIDEO] Performance monitoring error:", e);
           }
         }, 3000);
-        
+
+        // store interval reference for cleanup
+        window._performanceMonitorInterval = monitorInterval;
         return monitorInterval;
       }
       
@@ -1945,6 +1992,116 @@ document.addEventListener("DOMContentLoaded", () => {
       setTimeout(initializeVideoSystem, 1000);
     }
     window.__setBgVideoVariant = (i) => { setBgVideoVariant(i, "manual"); };
+    // ==================== GLOBAL CLEANUP ====================
+    const cleanupHandler = () => {
+      console.log('[CLEANUP] Page unloading, cleaning up video resources');
+      
+      try {
+        // Clean up dual video system
+        if (dualVideoSystem && typeof dualVideoSystem.destroy === 'function') {
+          dualVideoSystem.destroy();
+          dualVideoSystem = null;
+        }
+      } catch (e) {
+        console.error('[CLEANUP] Error destroying dual video system:', e);
+      }
+      
+      try {
+        // Clean up performance monitoring
+        if (window._performanceMonitorInterval) {
+          clearInterval(window._performanceMonitorInterval);
+          window._performanceMonitorInterval = null;
+        }
+      } catch (e) {
+        console.error('[CLEANUP] Error clearing performance monitor:', e);
+      }
+      
+      try {
+        // Clean up Safari canvas
+        if (staticCanvas && staticCanvas.parentNode) {
+          staticCanvas.width = 1;
+          staticCanvas.height = 1;
+          staticCanvas.parentNode.removeChild(staticCanvas);
+          staticCanvas = null;
+        }
+      } catch (e) {
+        console.error('[CLEANUP] Error cleaning canvas:', e);
+      }
+      
+      try {
+        // Clean up Safari cache
+        if (fallbackCache && typeof fallbackCache.clear === 'function') {
+          fallbackCache.clear();
+          fallbackCache = null;
+        }
+      } catch (e) {
+        console.error('[CLEANUP] Error clearing fallback cache:', e);
+      }
+      
+      try {
+        // Clean up main video
+        if (bg) {
+          bg.pause();
+          bg.src = '';
+          bg.load();
+        }
+      } catch (e) {
+        console.error('[CLEANUP] Error cleaning main video:', e);
+      }
+      
+      // Stop all animations to prevent memory leaks
+      try {
+        if (window._circleAnimating) {
+          window._circleAnimating = false;
+        }
+        if (window._shipsAnimating) {
+          window._shipsAnimating = false;
+        }
+      } catch (e) {
+        console.error('[CLEANUP] Error stopping animations:', e);
+      }
+      
+      console.log('[CLEANUP] Video cleanup complete');
+    };
+
+    // Register cleanup handlers
+    window.addEventListener('beforeunload', cleanupHandler);
+    
+    // Visibility change handler
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        console.log('[CLEANUP] Page hidden, pausing videos for memory conservation');
+        
+        if (dualVideoSystem && dualVideoSystem.secondaryVideo) {
+          try {
+            dualVideoSystem.secondaryVideo.pause();
+          } catch (e) {
+            console.warn('[CLEANUP] Error pausing secondary video:', e);
+          }
+        }
+      } else if (!document.hidden && bg) {
+        console.log('[CLEANUP] Page visible again, resuming video');
+        
+        if (bg.paused) {
+          bg.play().catch(() => {});
+        }
+      }
+    });
+
+    // Error handler  
+    window.addEventListener('error', (e) => {
+      if (e.error && e.error.message && e.error.message.includes('video')) {
+        console.error('[CLEANUP] Video-related error detected, triggering cleanup');
+        
+        if (dualVideoSystem && dualVideoSystem.destroy) {
+          try {
+            dualVideoSystem.destroy();
+          } catch (cleanupError) {
+            console.error('[CLEANUP] Emergency cleanup failed:', cleanupError);
+          }
+        }
+      }
+    });
   })();
 
   if (textInput) {
