@@ -10,6 +10,7 @@ import session from 'express-session';
 import rateLimit from 'express-rate-limit';
 import DOMPurify from 'isomorphic-dompurify';
 import crypto from 'crypto';
+import FileStore from 'session-file-store';
 
 dotenv.config();
 
@@ -71,12 +72,19 @@ const adminActionLimit = rateLimit({
   message: { ok: false, error: 'Too many admin actions, ratelimiting' }
 });
 
+const fileStore = FileStore(session);
+
 app.use(session({
+  store: new fileStore({
+    path: './data/sessions',    // Store sessions in data folder
+    retries: 2,
+    secret: 'session-secret'    // Additional encryption
+  }),
   secret: process.env.SESSION_SECRET || crypto.randomBytes(64).toString('hex'),
   resave: false,
   saveUninitialized: false,
   cookie: { 
-    secure: true, // HTTPS only
+    secure: process.env.NODE_ENV === 'production', // ✅ Fix this too
     httpOnly: true,
     maxAge: 30 * 60 * 1000 // 30 minutes
   }
