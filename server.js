@@ -7,11 +7,18 @@ import dotenv from "dotenv";
 import path from "path";
 import nodemailer from "nodemailer";
 import session from 'express-session';
+import rateLimit from 'express-rate-limit';
+import DOMPurify from 'isomorphic-dompurify';
+import crypto from 'crypto';
 
 dotenv.config();
 
 const NOTIFY_LIST = (process.env.NOTIFY_LIST || "").split(",").map(s => s.trim()).filter(Boolean); // recipients
 const EMAIL_FROM = process.env.EMAIL_FROM || `no-reply@${process.env.DOMAIN || "example.com"}`;
+const clientRateMap = new Map(); // IP -> { count, resetTime }
+const RATE_LIMIT_WINDOW = 60000; // 1 minute
+const RATE_LIMIT_MAX_MESSAGES = 10; // max messages per window
+
 let mailer;
 if (process.env.EMAIL_SMTP_HOST && process.env.EMAIL_SMTP_USER) {
   mailer = nodemailer.createTransport({
@@ -51,19 +58,31 @@ app.set('trust proxy', true);
 app.use(express.json());
 const server = http.createServer(app);
 const io = new Server(server);
+const adminAuthLimit = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // limit each IP to 10 requests per windowMs
+  message: { ok: false, error: 'Too many attempts, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+const adminActionLimit = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 60, // limit each IP to 30 requests per windowMs
+  message: { ok: false, error: 'Too many admin actions, ratelimiting' }
+});
 
 app.use(session({
   secret: process.env.SESSION_SECRET || crypto.randomBytes(64).toString('hex'),
   resave: false,
   saveUninitialized: false,
   cookie: { 
-    secure: process.env.NODE_ENV === 'production', // HTTPS only in prod
+    secure: true, // HTTPS only
     httpOnly: true,
     maxAge: 30 * 60 * 1000 // 30 minutes
   }
 }));
 
-app.post("/api/admin-auth", (req, res) => {
+app.post("/api/admin-auth", adminAuthLimit,(req, res) => {
   try {
     const ip = getIpFromReq(req);
     const { password } = req.body || {};
@@ -222,7 +241,6 @@ app.use(express.static("public")); // put index.html, bubbles.js, video in 'publ
 
 // Socket.io connection
 io.on("connection", (socket) => {
-
   const ip = 
   (socket.handshake && socket.handshake.headers && socket.handshake.headers['x-forwarded-for'] && socket.handshake.headers['x-forwarded-for'].split(',')[0].trim()) ||
   socket.handshake?.address ||
@@ -238,8 +256,22 @@ io.on("connection", (socket) => {
 
   // Handle new messages
   socket.on("newText", (data) => {
-    // sanitize input
-    const text = typeof data?.text === "string" ? data.text.trim() : "";
+    // Validate and sanitize
+    let text = typeof data?.text === "string" ? data.text.trim() : "";
+    
+    // Length check
+    if (!text || text.length > 10000) {
+      return; // Reject oversized content
+    }
+    
+    // Basic HTML sanitization
+    text = DOMPurify.sanitize(text, { ALLOWED_TAGS: [] }); // Strip all HTML
+    
+    // Rate limiting per IP
+    const clientIP = socket.data.ip;
+    if (isRateLimited(clientIP)) {
+      return; // Silently reject if rate limited
+    }
     const emailRaw = typeof data?.email === "string" ? data.email.trim() : null;
     const email = (emailRaw && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailRaw)) ? emailRaw : null;
 
@@ -351,7 +383,7 @@ app.post("/api/admin/delete-ship", requireAdmin, (req, res) => {
   }
 });
 
-app.post("/api/admin/clear-all", requireAdmin, (req, res) => {
+app.post("/api/admin/clear-all", adminActionLimit, requireAdmin, (req, res) => {
   try {
     const ip = getIpFromReq(req);
     const time = new Date().toISOString();
@@ -469,6 +501,38 @@ app.post("/api/admin/emails", requireAdmin, (req, res) => {
     res.status(500).json({ ok: false, error: "internal_error" });
   }
 });
+
+
+
+function isRateLimited(ip) {
+  if (!ip) return false;
+  
+  const now = Date.now();
+  const client = clientRateMap.get(ip);
+  
+  if (!client || now > client.resetTime) {
+    // First request or window expired
+    clientRateMap.set(ip, { count: 1, resetTime: now + RATE_LIMIT_WINDOW });
+    return false;
+  }
+  
+  if (client.count >= RATE_LIMIT_MAX_MESSAGES) {
+    return true; // Rate limited
+  }
+  
+  client.count++;
+  return false;
+}
+
+// Clean up old entries periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, data] of clientRateMap.entries()) {
+    if (now > data.resetTime) {
+      clientRateMap.delete(ip);
+    }
+  }
+}, RATE_LIMIT_WINDOW);
 
 // Start server
 server.listen(PORT, () => {

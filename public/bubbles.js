@@ -2246,51 +2246,51 @@ document.addEventListener("DOMContentLoaded", () => {
   document.addEventListener("keydown", async (e) => {
     if (e.shiftKey && e.key.toLowerCase() === "a") {
       const input = prompt("Enter admin password:");
-        if (!input) return;
-        try {
-          const res = await fetch("/api/admin-auth", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ password: input }),
-          });
-          if (res.ok) {
-            const data = await res.json();
-            adminMode = true;
-            window._adminToken = data.token;
-            document.body.classList.add("admin-mode");
-            createAdminControls();
-            checkBackupStatus();
-            alert("Admin mode activated. You can now right-click ships to delete them.");
-          } else {
-            alert("Incorrect password.");
-          }
-        } catch (err) {
-          alert("Auth error, try again.");
+      if (!input) return;
+      
+      try {
+        const res = await fetch("/api/admin-auth", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: input }),
+        });
+        
+        if (res.ok) {
+          adminMode = true;
+          document.body.classList.add("admin-mode");
+          createAdminControls();
+          checkBackupStatus();
+          alert("Admin mode activated. You can now right-click ships to delete them.");
+        } else {
+          alert("Incorrect password.");
         }
+      } catch (err) {
+        console.error("Auth error:", err);
+        alert("Auth error, try again.");
       }
-    });
-  });
-
-  async function checkBackupStatus() {
-    if (!window._adminToken) return;
-    try {
-      const res = await fetch("/api/admin/backup-status", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const undoBtn = document.getElementById("admin-undo-button");
-        if (undoBtn && data.hasBackup) {
-          undoBtn.style.display = "block";
-          // Optionally show backup info in button text
-          const count = data.backupInfo?.messageCount || 0;
-          undoBtn.innerText = `Undo Clear All (${count} ships)`;
-        }
-      }
-    } catch (err) {
-      console.error("Error checking backup status:", err);
     }
+  });
+});
+
+async function checkBackupStatus() {
+  try {
+    const res = await fetch("/api/admin/backup-status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const undoBtn = document.getElementById("admin-undo-button");
+      if (undoBtn && data.hasBackup) {
+        undoBtn.style.display = "block";
+        // Optionally show backup info in button text
+        const count = data.backupInfo?.messageCount || 0;
+        undoBtn.innerText = `Undo Clear All (${count} ships)`;
+      }
+    }
+  } catch (err) {
+    console.error("Error checking backup status:", err);
+  }
 }
 
 function createAdminControls() {
@@ -2510,10 +2510,6 @@ function createAdminControls() {
 }
 
 async function fetchEmailLogs(panel, forceReload = false) {
-  if (!window._adminToken) { alert("Admin token missing — re-authenticate."); 
-    alert("admin session expired - re-authenticate.");
-    return; 
-  }
   const pre = panel.querySelector("pre");
   if (!pre) return;
   try {
@@ -2549,6 +2545,9 @@ async function fetchEmailLogs(panel, forceReload = false) {
       panel.dataset.loaded = "true";
     } else if (resp.status === 401) {
       pre.innerText = "Unauthorized. The password may be incorrect.";
+      window._adminToken = null;
+      adminMode = false;
+      document.body.classList.remove("admin-mode");
     } else {
       pre.innerText = `Failed to load logs: ${resp.status}`;
     }
