@@ -171,7 +171,6 @@ function createShip(msg, container = document.body) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-          password: window._adminPassword, 
           shipText: shipText 
         }),
       });
@@ -2255,8 +2254,9 @@ document.addEventListener("DOMContentLoaded", () => {
             body: JSON.stringify({ password: input }),
           });
           if (res.ok) {
+            const data = await res.json();
             adminMode = true;
-            window._adminPassword = input;
+            window._adminToken = data.token;
             document.body.classList.add("admin-mode");
             createAdminControls();
             checkBackupStatus();
@@ -2272,12 +2272,11 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   async function checkBackupStatus() {
-    if (!window._adminPassword) return;
+    if (!window._adminToken) return;
     try {
       const res = await fetch("/api/admin/backup-status", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: window._adminPassword }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -2333,7 +2332,6 @@ function createAdminControls() {
       const res = await fetch("/api/admin/undo-clear", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: window._adminPassword }),
       });
       
       if (res.ok) {
@@ -2395,7 +2393,6 @@ function createAdminControls() {
       const res = await fetch("/api/admin/clear-all", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: window._adminPassword }),
       });
       
       if (res.ok) {
@@ -2513,7 +2510,10 @@ function createAdminControls() {
 }
 
 async function fetchEmailLogs(panel, forceReload = false) {
-  if (!window._adminPassword) { alert("Admin password missing — re-authenticate."); return; }
+  if (!window._adminToken) { alert("Admin token missing — re-authenticate."); 
+    alert("admin session expired - re-authenticate.");
+    return; 
+  }
   const pre = panel.querySelector("pre");
   if (!pre) return;
   try {
@@ -2521,7 +2521,6 @@ async function fetchEmailLogs(panel, forceReload = false) {
     const resp = await fetch("/api/admin/emails", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password: window._adminPassword }),
     });
     if (resp.status === 200) {
       const txt = await resp.text();

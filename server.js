@@ -6,6 +6,7 @@ import fs from "fs";
 import dotenv from "dotenv";
 import path from "path";
 import nodemailer from "nodemailer";
+import session from 'express-session';
 
 dotenv.config();
 
@@ -51,6 +52,17 @@ app.use(express.json());
 const server = http.createServer(app);
 const io = new Server(server);
 
+app.use(session({
+  secret: process.env.SESSION_SECRET || crypto.randomBytes(64).toString('hex'),
+  resave: false,
+  saveUninitialized: false,
+  cookie: { 
+    secure: process.env.NODE_ENV === 'production', // HTTPS only in prod
+    httpOnly: true,
+    maxAge: 30 * 60 * 1000 // 30 minutes
+  }
+}));
+
 app.post("/api/admin-auth", (req, res) => {
   try {
     const ip = getIpFromReq(req);
@@ -62,8 +74,17 @@ app.post("/api/admin-auth", (req, res) => {
         return res.status(400).json({ ok: false });
       }
       const success = password === ADMIN_PASSWORD;
+
       fs.appendFile(LOG_FILE || './logs/messages.log', `[ADMIN AUTH] [${time}] IP: ${ip || 'unknown'} - ${success ? 'success' : 'failure'}\n`, () => {});
-      if (success) return res.json({ ok: true });
+      if (success) {
+        req.session.isAdmin = true;
+        req.session.adminLoginTime = Date.now();
+
+        return res.json({ 
+          ok: true,
+          token: req.sessionID 
+        });
+      }
       return res.status(401).json({ ok: false });
     } catch (e) {
       console.error("Failed to write admin auth log:", e);
@@ -92,6 +113,18 @@ let STATE_FILE = process.env.STATE_FILE || './data/state.json';
 let BACKUP_FILE = process.env.BACKUP_FILE || './data/backup.json';
 BACKUP_FILE = prepareFile(BACKUP_FILE);
 ensureParentDir(BACKUP_FILE);
+
+function requireAdmin(req, res, next) {
+  if (!req.session?.isAdmin) {
+    return res.status(401).json({ ok: false, error: 'Unauthorized' });
+  }
+  const sessionAge = Date.now() - (req.session.adminLoginTime || 0);
+  if (sessionAge > 30 * 60 * 1000) {
+    req.session.destroy();
+    return res.status(401).json({ ok: false, error: 'Session expired' });
+  }
+  next();
+}
 
 function prepareFile(filePath) {
   const dir = path.dirname(filePath);
@@ -280,17 +313,11 @@ io.on("connection", (socket) => {
   
 });
 
-app.post("/api/admin/delete-ship", (req, res) => {
+app.post("/api/admin/delete-ship", requireAdmin, (req, res) => {
   try {
     const ip = getIpFromReq(req);
-    const supplied = req.body?.password;
     const shipText = req.body?.shipText;
     const time = new Date().toISOString();
-
-    if (!supplied || supplied !== ADMIN_PASSWORD) {
-      fs.appendFile(LOG_FILE, `[ADMIN DELETE SHIP] [${time}] IP: ${ip || 'unknown'} - unauthorized attempt\n`, (e)=>{ if(e) console.error(e); });
-      return res.status(401).json({ ok: false, error: "unauthorized" });
-    }
 
     if (!shipText) {
       return res.status(400).json({ ok: false, error: "missing_ship_text" });
@@ -324,16 +351,10 @@ app.post("/api/admin/delete-ship", (req, res) => {
   }
 });
 
-app.post("/api/admin/clear-all", (req, res) => {
+app.post("/api/admin/clear-all", requireAdmin, (req, res) => {
   try {
     const ip = getIpFromReq(req);
-    const supplied = req.body?.password;
     const time = new Date().toISOString();
-
-    if (!supplied || supplied !== ADMIN_PASSWORD) {
-      fs.appendFile(LOG_FILE, `[ADMIN CLEAR] [${time}] IP: ${ip || 'unknown'} - unauthorized attempt\n`, (e)=>{ if(e) console.error(e); });
-      return res.status(401).json({ ok: false, error: "unauthorized" });
-    }
 
     // CREATE BACKUP and save to disk
     const backupData = {
@@ -366,16 +387,10 @@ app.post("/api/admin/clear-all", (req, res) => {
   }
 });
 
-app.post("/api/admin/undo-clear", (req, res) => {
+app.post("/api/admin/undo-clear", requireAdmin, (req, res) => {
   try {
     const ip = getIpFromReq(req);
-    const supplied = req.body?.password;
     const time = new Date().toISOString();
-
-    if (!supplied || supplied !== ADMIN_PASSWORD) {
-      fs.appendFile(LOG_FILE, `[ADMIN UNDO] [${time}] IP: ${ip || 'unknown'} - unauthorized attempt\n`, (e)=>{ if(e) console.error(e); });
-      return res.status(401).json({ ok: false, error: "unauthorized" });
-    }
 
     // Load backup from disk
     const backupData = loadBackup();
@@ -407,12 +422,8 @@ app.post("/api/admin/undo-clear", (req, res) => {
   }
 });
 
-app.post("/api/admin/backup-status", (req, res) => {
+app.post("/api/admin/backup-status", requireAdmin, (req, res) => {
   try {
-    const supplied = req.body?.password;
-    if (!supplied || supplied !== ADMIN_PASSWORD) {
-      return res.status(401).json({ ok: false, error: "unauthorized" });
-    }
 
     const backupData = loadBackup();
     const hasBackup = !!(backupData && backupData.messages);
@@ -432,19 +443,10 @@ app.post("/api/admin/backup-status", (req, res) => {
   }
 });
 
-app.post("/api/admin/emails", (req, res) => {
+app.post("/api/admin/emails", requireAdmin, (req, res) => {
   try {
     const ip = getIpFromReq(req);
-    const supplied =
-      (req.body && req.body.password) ||
-      (req.headers && req.headers.authorization && req.headers.authorization.split(" ")[1]);
-
     const time = new Date().toISOString();
-
-    if (!supplied || supplied !== ADMIN_PASSWORD) {
-      fs.appendFile(LOG_FILE, `[ADMIN EMAILS] [${time}] IP: ${ip || 'unknown'} - unauthorized attempt\n`, (e)=>{ if(e) console.error(e); });
-      return res.status(401).json({ ok: false, error: "unauthorized" });
-    }
 
     fs.appendFile(LOG_FILE, `[ADMIN EMAILS] [${time}] IP: ${ip || 'unknown'} - authorized fetch\n`, (e)=>{ if(e) console.error(e); });
 
