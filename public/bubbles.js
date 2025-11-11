@@ -863,9 +863,23 @@ document.addEventListener("DOMContentLoaded", () => {
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      timeout: 20000,
-      forceNew: forceNew // This is the key change
+      reconnectionDelayMax: 30000,
+      timeout: 30000,
+      forceNew: forceNew,
+      // additional resilience options
+      upgrade: true,
+      rememberUpgrade: false,
+      transports: ['polling', 'websocket'],
+
+      // render.com optimisations
+      query: {
+        t: Date.now(), // cache busting for server issues
+        client: 'web'
+      },
+
+      // resilience for server restarts
+      autoConnect: true,
+      randomizationFactor: 0.5, // jitter to reconn attempts
     });
     
     window.socket = socket;
@@ -874,51 +888,82 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   
   function setupSocketHandlers() {
+    let serverDownStartTime = null;
+    let lastSuccessfulConnection = Date.now();
+    let heartbeatInterval = null;
+
     socket.on("connect", () => {
       console.log("socket connected", socket.id);
       
+      if (serverDownStartTime) {
+        const downDuration = Math.round((Date.now() - serverDownStartTime) / 1000);
+        console.log(`[RECONNECT] Server back up after ${downDuration}s downtime`);
+        serverDownStartTime = null;
+      }
+      
       if (wasConnected && reconnectAttempts > 0) {
         console.log(`[RECONNECT] Successfully reconnected after ${reconnectAttempts} attempts ${socket.io.opts.forceNew ? '(forced new connection)' : ''}`);
-        
-        // Reset escalation after successful connection
         reconnectAttempts = 0;
       } else if (!wasConnected) {
         console.log("[CONNECT] Initial connection established");
       }
+      if (heartbeatInterval) clearInterval(heartbeatInterval);
+      heartbeatInterval = setInterval(() => {
+        if (socket.connected) {
+          socket.emit('ping', Date.now());
+        }
+      }, 25000);
       
+      lastSuccessfulConnection = Date.now();
       wasConnected = true;
     });
 
     socket.on("disconnect", (reason) => {
       console.log(`[DISCONNECT] Socket disconnected: ${reason}`);
+      if (reason === "io server disconnect") {
+        console.log("server intentionally disconnected - most probably restarting");
+      }
+      if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+        heartbeatInterval = null;
+      }
     });
 
     socket.on("connect_error", (err) => {
       console.error("[CONNECT ERROR] Socket connect_error:", err);
+
+      if (!serverDownStartTime) {
+        serverDownStartTime = Date.now();
+        console.log("[SERVER DOWN] Detected server outage, starting resilient reconnection");
+      }
+
+      if (err.message && err.message.includes("502")) {
+        console.log("[RENDER 502] Server temporarily unavailable - this is normal for free tier");
+      } else if (err.description && err.description.includes("502")) {
+        console.log("[RENDER 502] Server returning 502 Bad Gateway - server restarting");
+      }
     });
 
     socket.on("reconnect_attempt", (attemptNumber) => {
       reconnectAttempts = attemptNumber;
       console.log(`[RECONNECT] Attempt #${attemptNumber}`);
+      const timeSinceLastSuccess = Date.now() - lastSuccessfulConnection;
+      const minutesDown = Math.round(timeSinceLastSuccess / 60000);
       
+
+      if (attemptNumber % 10 === 0) {
+        console.log(`[RECONNECT] Extended outage: ${minutesDown}min down, attempt ${attemptNumber}`);
+      }
       // Progressive escalation strategy
       if (attemptNumber === FORCE_NEW_THRESHOLD) {
         console.log(`[RECONNECT] ${FORCE_NEW_THRESHOLD} attempts failed - switching to forceNew: true`);
         createSocket(true); // Force new connection
         
-      } else if (attemptNumber === ESCALATION_THRESHOLD) {
-        console.log(`[RECONNECT] ${ESCALATION_THRESHOLD} attempts failed - trying complete reset`);
-        // Even more aggressive: wait longer then force new
+      } else if (attemptNumber > 50 && attemptNumber % 20 === 0) {
+        console.log(`[RECONNECT] Long outage detected (${minutesDown}min), trying cache-busting`);
         setTimeout(() => {
           createSocket(true);
-        }, 10000); // Wait 10 seconds before trying again
-        
-      } else if (attemptNumber > ESCALATION_THRESHOLD && attemptNumber % 30 === 0) {
-        // Every 30 attempts after escalation, try a complete reset
-        console.log(`[RECONNECT] Attempt ${attemptNumber} - periodic complete reset`);
-        setTimeout(() => {
-          createSocket(true);
-        }, 15000); // Wait 15 seconds
+        }, 5000);
       }
     });
 
@@ -930,6 +975,25 @@ document.addEventListener("DOMContentLoaded", () => {
     socket.on("reconnect_failed", () => {
       console.error("[RECONNECT] All reconnection attempts failed - this shouldn't happen with Infinity attempts");
     });
+
+    socket.on("reconnect_error", (err) => {
+      console.error(`[RECONNECT ERROR] Reconnection failed: ${err.message || err}`);
+      
+      // Detect common Render.com restart scenarios
+      if (err.message && (err.message.includes("502") || err.message.includes("503") || err.message.includes("timeout"))) {
+        console.log("[RENDER RESTART] Server appears to be restarting, will continue trying...");
+      }
+    });
+
+    socket.on("error", (err) => {
+      console.error(`[SOCKET ERROR] General socket error: ${err.message || err}`);
+    });
+
+    socket.on('pong', (timestamp) => {
+      const latency = Date.now() - timestamp;
+      console.log(`[HEARTBEAT] Pong received, latency: ${latency}ms`);
+    });
+    
 
     socket.on("newText", (msg) => {
       const last = messages[messages.length - 1];
@@ -955,7 +1019,7 @@ document.addEventListener("DOMContentLoaded", () => {
           console.log(`[CIRCLE MODE] Adding new ship to circle: ${msg.text.substring(0, 50)}${msg.text.length > 50 ? '...' : ''}`);
           createShip(msg, circle);
         }
-      }  // ← FIXED: Added missing closing brace
+      }
       
       console.log(`[NEW MESSAGE] Received: ${msg.text.substring(0, 50)}${msg.text.length > 50 ? '...' : ''}`);
     });
