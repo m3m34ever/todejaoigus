@@ -366,8 +366,18 @@ function createCircleOverlay() {
   // initialize circleState positions if not set
   const vminPx = Math.min(window.innerWidth, window.innerHeight) / 100;
   const sizePx = circleState.sizeVmin * vminPx;
-  if (circleState.left === null) circleState.left = Math.round((window.innerWidth - sizePx) / 2);
-  if (circleState.top === null) circleState.top = Math.round((window.innerHeight - sizePx) / 2);
+  if (circleState.left === null) {
+    const moveStep = 24;
+    const centerLeft = Math.round((window.innerWidth - sizePx) / 2);
+    const centerTop = Math.round((window.innerHeight - sizePx) / 2);
+    
+    circleState.left = centerLeft - (moveStep * 2); // 2 presses left
+    circleState.top = centerTop + moveStep;         // 1 press down
+  } else if (circleState.top === null) {
+    const moveStep = 24;
+    const centerTop = Math.round((window.innerHeight - sizePx) / 2);
+    circleState.top = centerTop + moveStep; // 1 press down
+  }
   if (typeof updateCircleStyles === "function") updateCircleStyles();
 
   overlay.appendChild(circle);
@@ -589,8 +599,12 @@ function detectSafari() {
 function centerCircle() {
   const vminPx = Math.min(window.innerWidth, window.innerHeight) / 100;
   const sizePx = circleState.sizeVmin * vminPx;
-  circleState.left = Math.round((window.innerWidth - sizePx) / 2);
-  circleState.top = Math.round((window.innerHeight - sizePx) / 2);
+  const moveStep = 24;
+  const centerLeft = Math.round((window.innerWidth - sizePx) / 2);
+  const centerTop = Math.round((window.innerHeight - sizePx) / 2);
+
+  circleState.left = centerLeft - (moveStep *2);
+  circleState.top = centerTop + moveStep;
   updateCircleStyles();
 }
 
