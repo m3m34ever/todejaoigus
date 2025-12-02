@@ -2205,18 +2205,24 @@ document.addEventListener("DOMContentLoaded", () => {
     const textInput = document.getElementById("textInput");
     const emailInput = document.getElementById("emailInput");
     
+    // Detect if this is Firefox Android
+    const isFirefoxAndroid = /Android.*Firefox/i.test(navigator.userAgent);
+    
     // Prevent touch scroll/drag on body (but allow on inputs)
-    document.body.addEventListener('touchmove', function(e) {
-      // Allow scrolling inside text inputs
-      if (e.target === textInput || e.target === emailInput) {
+    // Use a less aggressive approach for Firefox
+    document.addEventListener('touchmove', function(e) {
+      const target = e.target;
+      // Allow scrolling inside text inputs and their containers
+      if (target === textInput || target === emailInput || 
+          (inputBox && inputBox.contains(target))) {
         return; // Allow default scroll in inputs
       }
       // Prevent page scroll/drag everywhere else
       e.preventDefault();
     }, { passive: false });
     
-    // Prevent pull-to-refresh gesture
-    document.body.addEventListener('touchstart', function(e) {
+    // Prevent pull-to-refresh / pinch zoom (but only on multi-touch)
+    document.addEventListener('touchstart', function(e) {
       if (e.touches.length > 1) {
         e.preventDefault(); // Prevent pinch zoom
       }
@@ -2232,6 +2238,8 @@ document.addEventListener("DOMContentLoaded", () => {
         
         requestAnimationFrame(() => {
           pendingUpdate = false;
+          if (!inputBox) return;
+          
           const viewport = window.visualViewport;
           const layoutHeight = window.innerHeight;
           const visualHeight = viewport.height;
@@ -2240,7 +2248,7 @@ document.addEventListener("DOMContentLoaded", () => {
           // Keyboard is likely open if there's a significant height difference
           if (keyboardHeight > 50) {
             // Account for viewport offset (scroll position within visual viewport)
-            const offsetTop = viewport.offsetTop;
+            const offsetTop = viewport.offsetTop || 0;
             inputBox.style.position = 'fixed';
             inputBox.style.bottom = `${keyboardHeight - offsetTop + 10}px`;
             inputBox.style.transition = 'bottom 0.1s ease-out';
@@ -2276,9 +2284,18 @@ document.addEventListener("DOMContentLoaded", () => {
           }, 100);
         });
       });
+      
+      // Firefox Android specific: force initial layout
+      if (isFirefoxAndroid) {
+        setTimeout(() => {
+          if (inputBox) {
+            inputBox.style.visibility = 'visible';
+            inputBox.style.opacity = '1';
+          }
+        }, 100);
+      }
     } else {
       // Fallback for browsers without visualViewport (old Firefox, etc.)
-      // Use resize event as a proxy for keyboard open/close
       let lastHeight = window.innerHeight;
       
       window.addEventListener('resize', () => {
@@ -2286,11 +2303,9 @@ document.addEventListener("DOMContentLoaded", () => {
         const heightDiff = lastHeight - newHeight;
         
         if (inputBox && heightDiff > 100) {
-          // Keyboard likely opened
           inputBox.style.position = 'fixed';
           inputBox.style.bottom = `${heightDiff + 10}px`;
         } else if (inputBox && heightDiff < -100) {
-          // Keyboard likely closed
           inputBox.style.bottom = '';
         }
         

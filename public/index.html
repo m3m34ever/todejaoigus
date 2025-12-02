@@ -101,6 +101,15 @@ body {
   stroke-width: 1.5;
 }
 
+@-moz-document url-prefix() {
+  .ship polygon {
+    fill: rgba(255, 255, 255, 0.05);
+    stroke: #ffffff !important;
+  }
+  .ship line {
+    stroke: #ffffff !important;
+  }
+}
 
 /* Overlay for full text */
 #overlay {
@@ -178,6 +187,9 @@ body {
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
   touch-action: pan-y;
+  visibility: visible !important;
+  opacity: 1 !important;
+  display: block !important;
 }
 
 @supports (height: 100dvh) {
