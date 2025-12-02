@@ -2,10 +2,19 @@
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Text Ships</title>
 <style>
-html, body { -webkit-text-size-adjust: 100%; -moz-text-size-adjust: 100%; -ms-text-size-adjust: 100%; text-size-adjust: 100%; height: 100dvh;}
+html, body { 
+  -webkit-text-size-adjust: 100%; 
+  -moz-text-size-adjust: 100%; 
+  -ms-text-size-adjust: 100%; 
+  text-size-adjust: 100%; 
+  height: 100dvh;
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: touch;
+  touch-action: none;
+}
 body {
   margin:0;
   background:#313c34;
@@ -13,6 +22,11 @@ body {
   overflow:hidden;
   color: white; /* default text color */
   min-height: 100dvh;
+  position: fixed;
+  width: 100%;
+  top: 0;
+  left: 0;
+  overscroll-behavior-y: contain;
 }
 
 /* Ships */
@@ -159,6 +173,17 @@ body {
   transform:translateX(-50%);
   z-index:10000;
   font-family: 'CenturyExpanded', Arial, sans-serif;
+  will-change: transform;
+  -webkit-transform: translateX(-50%);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  touch-action: pan-y;
+}
+
+@supports (height: 100dvh) {
+  #inputBox {
+    bottom: max(10px + env(safe-area-inset-bottom), 10px);
+  }
 }
 
 /* Video background */
@@ -181,6 +206,8 @@ body {
   -webkit-backface-visibility: hidden;
   transform-style: preserve-3d;
   -webkit-transform-style: preserve-3d;
+  touch-action: none;
+  pointer-events: none;
 }
 @media (orientation: portrait), (max-aspect-ratio: 3/4) {
   #bgVideo {

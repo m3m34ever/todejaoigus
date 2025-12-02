@@ -2199,6 +2199,105 @@ document.addEventListener("DOMContentLoaded", () => {
   window.addEventListener("resize", updateVh);
   window.addEventListener("orientationchange", updateVh);
 
+  // android browser keyboard and touch scroll fix
+  (function setupMobileInputFix() {
+    const inputBox = document.getElementById("inputBox");
+    const textInput = document.getElementById("textInput");
+    const emailInput = document.getElementById("emailInput");
+    
+    // Prevent touch scroll/drag on body (but allow on inputs)
+    document.body.addEventListener('touchmove', function(e) {
+      // Allow scrolling inside text inputs
+      if (e.target === textInput || e.target === emailInput) {
+        return; // Allow default scroll in inputs
+      }
+      // Prevent page scroll/drag everywhere else
+      e.preventDefault();
+    }, { passive: false });
+    
+    // Prevent pull-to-refresh gesture
+    document.body.addEventListener('touchstart', function(e) {
+      if (e.touches.length > 1) {
+        e.preventDefault(); // Prevent pinch zoom
+      }
+    }, { passive: false });
+    
+    // Keyboard repositioning - works on Chrome, Firefox, Samsung Browser
+    if (window.visualViewport) {
+      let pendingUpdate = false;
+      
+      function repositionInputBox() {
+        if (!inputBox || pendingUpdate) return;
+        pendingUpdate = true;
+        
+        requestAnimationFrame(() => {
+          pendingUpdate = false;
+          const viewport = window.visualViewport;
+          const layoutHeight = window.innerHeight;
+          const visualHeight = viewport.height;
+          const keyboardHeight = layoutHeight - visualHeight;
+          
+          // Keyboard is likely open if there's a significant height difference
+          if (keyboardHeight > 50) {
+            // Account for viewport offset (scroll position within visual viewport)
+            const offsetTop = viewport.offsetTop;
+            inputBox.style.position = 'fixed';
+            inputBox.style.bottom = `${keyboardHeight - offsetTop + 10}px`;
+            inputBox.style.transition = 'bottom 0.1s ease-out';
+          } else {
+            // Reset to CSS default
+            inputBox.style.bottom = '';
+            inputBox.style.transition = '';
+          }
+        });
+      }
+      
+      window.visualViewport.addEventListener('resize', repositionInputBox);
+      window.visualViewport.addEventListener('scroll', repositionInputBox);
+      
+      // Handle focus/blur with delays for keyboard animation
+      [textInput, emailInput].forEach(input => {
+        if (!input) return;
+        
+        input.addEventListener('focus', () => {
+          // Multiple attempts to catch keyboard animation
+          setTimeout(repositionInputBox, 50);
+          setTimeout(repositionInputBox, 150);
+          setTimeout(repositionInputBox, 300);
+          setTimeout(repositionInputBox, 500);
+        });
+        
+        input.addEventListener('blur', () => {
+          setTimeout(() => {
+            if (inputBox) {
+              inputBox.style.bottom = '';
+              inputBox.style.transition = '';
+            }
+          }, 100);
+        });
+      });
+    } else {
+      // Fallback for browsers without visualViewport (old Firefox, etc.)
+      // Use resize event as a proxy for keyboard open/close
+      let lastHeight = window.innerHeight;
+      
+      window.addEventListener('resize', () => {
+        const newHeight = window.innerHeight;
+        const heightDiff = lastHeight - newHeight;
+        
+        if (inputBox && heightDiff > 100) {
+          // Keyboard likely opened
+          inputBox.style.position = 'fixed';
+          inputBox.style.bottom = `${heightDiff + 10}px`;
+        } else if (inputBox && heightDiff < -100) {
+          // Keyboard likely closed
+          inputBox.style.bottom = '';
+        }
+        
+        lastHeight = newHeight;
+      });
+    }
+  })();
   // Auto-expand text area
   if (textInput) {
     textInput.addEventListener("input", () => {
