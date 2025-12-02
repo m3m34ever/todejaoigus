@@ -37,8 +37,11 @@ if (process.env.EMAIL_SMTP_HOST && process.env.EMAIL_SMTP_USER) {
 
 function sendNotificationEmail(msg) {
   if (!mailer || NOTIFY_LIST.length === 0) return;
-  const subject = `New feedback message received from ${msg.email || 'anonymous'}`;
-  const body = `Message:\n\n${msg.text}\n\nUser-supplied email: ${msg.email || "(none)"}\n\nLogged at: ${msg.time}\n`;
+  const hasUserEmail = !!msg.email;
+  const subject = hasUserEmail 
+    ? `New feedback message from ${msg.email}`
+    : `New anonymous message received`;
+  const body = `Message:\n\n${msg.text}\n\nUser-supplied email: ${msg.email || "(none - anonymous)"}\n\nLogged at: ${msg.time}\nIP: ${msg.ip || "unknown"}\n`;
   const mail = {
     from: EMAIL_FROM,
     to: NOTIFY_LIST.join(","),
@@ -308,23 +311,22 @@ io.on("connection", (socket) => {
       if (err) console.error("Error writing to log file:", err);
     });
 
+    // ALWAYS send notification email for every message
+    console.log(`[NEW MESSAGE] ${msg.text}` + (msg.email ? ` (email: ${msg.email})` : ' (anonymous)') + (msg.ip ? ` from ${msg.ip}` : ''));
+    try { 
+      sendNotificationEmail(msg); 
+    } catch (e) { 
+      console.error("sendNotificationEmail threw:", e && e.message); 
+    }
+
+    // Still log to email-specific file if email provided
     if (msg.email) {
       const emailLogEntry = `[${msg.time}] ${msg.text}` + (msg.email ? ` | Email: ${msg.email}` : "") + "\n";
       fs.appendFile(EMAIL_LOG_FILE, emailLogEntry, (err) => {
         if (err) console.error("Error writing to email log file:", err);
       });
-
-      // moved sendNotificationEmail INSIDE this branch so it only runs when email is valid
       console.log(`  Feedback email: ${msg.email}`);
-      try { 
-        sendNotificationEmail(msg); 
-      } catch (e) { 
-        console.error("sendNotificationEmail threw:", e && e.message); 
-      }
     }
-
-    // generic log for every message
-    console.log(`[NEW MESSAGE] ${msg.text}` + (msg.ip ? ` (from ${msg.ip})` : ''));
   });
   socket.on("disconnect", () => {
     console.log("A user disconnected", ip ? `from IP: ${ip}` : '');
@@ -510,7 +512,29 @@ app.post("/api/admin/emails", requireAdmin, (req, res) => {
   }
 });
 
-
+app.post("/api/admin/messages", requireAdmin, (req, res) => {
+  try {
+    const ip = getIpFromReq(req);
+    const time = new Date().toISOString();
+    
+    fs.appendFile(LOG_FILE, `[ADMIN MESSAGES LIST] [${time}] IP: ${ip || 'unknown'} - fetched ${messages.length} messages\n`, (e) => { if(e) console.error(e); });
+    
+    // Return all messages with full details for admin
+    res.json({
+      ok: true,
+      messages: messages.map((m, index) => ({
+        id: index,
+        text: m.text,
+        email: m.email || null,
+        time: m.time,
+        hasEmail: !!m.email
+      }))
+    });
+  } catch (err) {
+    console.error("Error fetching admin messages:", err);
+    res.status(500).json({ ok: false, error: "internal_error" });
+  }
+});
 
 function isRateLimited(ip) {
   if (!ip) return false;

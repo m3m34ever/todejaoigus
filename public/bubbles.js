@@ -2579,6 +2579,32 @@ function createAdminControls() {
   };
   container.appendChild(btn);
 
+  const allMsgsBtn = document.createElement("button");
+  allMsgsBtn.id = "admin-all-messages-button";
+  allMsgsBtn.innerText = "All Messages";
+  allMsgsBtn.style.background = "#224488";
+  allMsgsBtn.style.color = "#fff";
+  allMsgsBtn.style.border = "1px solid #113366";
+  allMsgsBtn.style.padding = "6px 10px";
+  allMsgsBtn.style.borderRadius = "4px";
+  allMsgsBtn.style.cursor = "pointer";
+  allMsgsBtn.style.fontSize = "12px";
+  allMsgsBtn.onclick = () => {
+    let msgPanel = document.getElementById("admin-all-messages-panel");
+    if (!msgPanel) {
+      msgPanel = createAllMessagesPanel();
+      container.appendChild(msgPanel);
+    }
+    const visible = msgPanel.style.display !== "none";
+    if (visible) {
+      fetchAllMessages(msgPanel);
+    } else {
+      msgPanel.style.display = "block";
+      fetchAllMessages(msgPanel);
+    }
+  };
+  container.appendChild(allMsgsBtn);
+
   // collapsible panel
   const panel = document.createElement("div");
   panel.id = "admin-email-panel-body";
@@ -2682,4 +2708,327 @@ async function fetchEmailLogs(panel, forceReload = false) {
   } catch (err) {
     pre.innerText = "Fetch error: " + String(err);
   }
+}
+
+function createAllMessagesPanel() {
+  const panel = document.createElement("div");
+  panel.id = "admin-all-messages-panel";
+  panel.style.display = "none";
+  panel.style.marginTop = "8px";
+  panel.style.width = "600px";
+  panel.style.maxWidth = "90vw";
+  panel.style.maxHeight = "70vh";
+  panel.style.overflow = "auto";
+  panel.style.background = "rgba(0,0,0,0.95)";
+  panel.style.color = "#fff";
+  panel.style.border = "1px solid #444";
+  panel.style.borderRadius = "6px";
+  panel.style.padding = "12px";
+  panel.style.boxShadow = "0 4px 16px rgba(0,0,0,0.6)";
+  panel.style.fontFamily = "monospace";
+  panel.style.fontSize = "12px";
+
+  // Header
+  const header = document.createElement("div");
+  header.style.display = "flex";
+  header.style.justifyContent = "space-between";
+  header.style.alignItems = "center";
+  header.style.marginBottom = "10px";
+  header.style.borderBottom = "1px solid #444";
+  header.style.paddingBottom = "8px";
+  panel.appendChild(header);
+
+  const title = document.createElement("div");
+  title.innerText = "All Messages";
+  title.style.fontWeight = "700";
+  title.style.fontSize = "14px";
+  header.appendChild(title);
+
+  const controls = document.createElement("div");
+  header.appendChild(controls);
+
+  const refreshBtn = document.createElement("button");
+  refreshBtn.innerText = "Refresh";
+  refreshBtn.style.marginRight = "6px";
+  refreshBtn.style.padding = "4px 8px";
+  refreshBtn.style.cursor = "pointer";
+  refreshBtn.onclick = () => fetchAllMessages(panel);
+  controls.appendChild(refreshBtn);
+
+  const closeBtn = document.createElement("button");
+  closeBtn.innerText = "Close";
+  closeBtn.style.padding = "4px 8px";
+  closeBtn.style.cursor = "pointer";
+  closeBtn.onclick = () => { panel.style.display = "none"; };
+  controls.appendChild(closeBtn);
+
+  // Content area
+  const content = document.createElement("div");
+  content.id = "admin-all-messages-content";
+  content.style.marginTop = "8px";
+  panel.appendChild(content);
+
+  return panel;
+}
+
+async function fetchAllMessages(panel) {
+  const content = panel.querySelector("#admin-all-messages-content");
+  if (!content) return;
+
+  content.innerHTML = '<div style="color:#888;">Loading...</div>';
+
+  try {
+    const resp = await fetch("/api/admin/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+
+    if (resp.status === 401) {
+      content.innerHTML = '<div style="color:#f88;">Unauthorized. Please re-authenticate as admin.</div>';
+      return;
+    }
+
+    if (!resp.ok) {
+      content.innerHTML = `<div style="color:#f88;">Failed to load: ${resp.status}</div>`;
+      return;
+    }
+
+    const data = await resp.json();
+    if (!data.ok || !data.messages) {
+      content.innerHTML = '<div style="color:#f88;">Invalid response from server.</div>';
+      return;
+    }
+
+    if (data.messages.length === 0) {
+      content.innerHTML = '<div style="color:#888;">No messages yet.</div>';
+      return;
+    }
+
+    // Build message list
+    content.innerHTML = "";
+    
+    const countDiv = document.createElement("div");
+    countDiv.style.marginBottom = "10px";
+    countDiv.style.color = "#aaa";
+    countDiv.innerText = `Total: ${data.messages.length} message(s)`;
+    content.appendChild(countDiv);
+
+    // Reverse to show newest first
+    const sortedMessages = [...data.messages].reverse();
+
+    for (const msg of sortedMessages) {
+      const row = document.createElement("div");
+      row.style.display = "flex";
+      row.style.alignItems = "flex-start";
+      row.style.gap = "10px";
+      row.style.padding = "8px";
+      row.style.marginBottom = "6px";
+      row.style.background = "rgba(255,255,255,0.05)";
+      row.style.borderRadius = "4px";
+      row.style.borderLeft = msg.hasEmail ? "3px solid #4a9" : "3px solid #666";
+
+      // Delete button
+      const deleteBtn = document.createElement("button");
+      deleteBtn.innerText = "🗑️";
+      deleteBtn.title = "Delete this message";
+      deleteBtn.style.background = "#c33";
+      deleteBtn.style.color = "#fff";
+      deleteBtn.style.border = "none";
+      deleteBtn.style.borderRadius = "3px";
+      deleteBtn.style.padding = "4px 8px";
+      deleteBtn.style.cursor = "pointer";
+      deleteBtn.style.fontSize = "12px";
+      deleteBtn.style.flexShrink = "0";
+      deleteBtn.onclick = async () => {
+        await deleteMessageWithConfirmation(msg, panel);
+      };
+      row.appendChild(deleteBtn);
+
+      // Message info container
+      const info = document.createElement("div");
+      info.style.flex = "1";
+      info.style.minWidth = "0";
+
+      // Timestamp
+      const timeDiv = document.createElement("div");
+      timeDiv.style.fontSize = "10px";
+      timeDiv.style.color = "#888";
+      timeDiv.style.marginBottom = "4px";
+      const formattedTime = formatTimestamp(msg.time);
+      timeDiv.innerText = formattedTime;
+      info.appendChild(timeDiv);
+
+      // Email (if present)
+      if (msg.email) {
+        const emailDiv = document.createElement("div");
+        emailDiv.style.fontSize = "11px";
+        emailDiv.style.color = "#4a9";
+        emailDiv.style.marginBottom = "4px";
+        emailDiv.innerText = `📧 ${msg.email}`;
+        info.appendChild(emailDiv);
+      }
+
+      // Message text
+      const textDiv = document.createElement("div");
+      textDiv.style.wordBreak = "break-word";
+      textDiv.style.whiteSpace = "pre-wrap";
+      textDiv.style.color = "#fff";
+      textDiv.innerText = msg.text.length > 500 ? msg.text.substring(0, 500) + "..." : msg.text;
+      info.appendChild(textDiv);
+
+      row.appendChild(info);
+      content.appendChild(row);
+    }
+
+  } catch (err) {
+    content.innerHTML = `<div style="color:#f88;">Error: ${err.message}</div>`;
+  }
+}
+
+function formatTimestamp(isoString) {
+  try {
+    const d = new Date(isoString);
+    if (isNaN(d)) return isoString;
+    
+    const tz = "Europe/Tallinn";
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      hour: "2-digit", 
+      minute: "2-digit",
+      second: "2-digit",
+      day: "2-digit", 
+      month: "2-digit", 
+      year: "numeric",
+      hour12: false,
+      timeZone: tz
+    }).formatToParts(d);
+    
+    const get = t => (parts.find(p => p.type === t) || {}).value || "";
+    return `${get("day")}/${get("month")}/${get("year")} ${get("hour")}:${get("minute")}:${get("second")}`;
+  } catch (e) {
+    return isoString;
+  }
+}
+
+async function deleteMessageWithConfirmation(msg, panel) {
+  // Create modal overlay for confirmation
+  const modal = document.createElement("div");
+  modal.style.position = "fixed";
+  modal.style.inset = "0";
+  modal.style.background = "rgba(0,0,0,0.8)";
+  modal.style.display = "flex";
+  modal.style.alignItems = "center";
+  modal.style.justifyContent = "center";
+  modal.style.zIndex = "99999";
+
+  const dialog = document.createElement("div");
+  dialog.style.background = "#222";
+  dialog.style.border = "1px solid #444";
+  dialog.style.borderRadius = "8px";
+  dialog.style.padding = "20px";
+  dialog.style.maxWidth = "500px";
+  dialog.style.width = "90%";
+  dialog.style.color = "#fff";
+  dialog.style.fontFamily = "monospace";
+
+  const title = document.createElement("h3");
+  title.style.margin = "0 0 15px 0";
+  title.style.color = "#f88";
+  title.innerText = "⚠️ Confirm Delete";
+  dialog.appendChild(title);
+
+  const msgPreview = document.createElement("div");
+  msgPreview.style.background = "rgba(255,255,255,0.05)";
+  msgPreview.style.padding = "10px";
+  msgPreview.style.borderRadius = "4px";
+  msgPreview.style.marginBottom = "15px";
+  msgPreview.style.maxHeight = "150px";
+  msgPreview.style.overflow = "auto";
+  msgPreview.style.wordBreak = "break-word";
+  msgPreview.innerHTML = `
+    <div style="font-size:10px;color:#888;margin-bottom:4px;">${formatTimestamp(msg.time)}</div>
+    ${msg.email ? `<div style="font-size:11px;color:#4a9;margin-bottom:4px;">📧 ${msg.email}</div>` : ''}
+    <div style="color:#fff;">${escapeHtml(msg.text.length > 200 ? msg.text.substring(0, 200) + "..." : msg.text)}</div>
+  `;
+  dialog.appendChild(msgPreview);
+
+  const warning = document.createElement("p");
+  warning.style.color = "#f88";
+  warning.style.fontSize = "12px";
+  warning.style.margin = "0 0 15px 0";
+  warning.innerText = "This action cannot be undone. The message will be permanently deleted from the server.";
+  dialog.appendChild(warning);
+
+  const btnContainer = document.createElement("div");
+  btnContainer.style.display = "flex";
+  btnContainer.style.justifyContent = "flex-end";
+  btnContainer.style.gap = "10px";
+
+  const cancelBtn = document.createElement("button");
+  cancelBtn.innerText = "Cancel";
+  cancelBtn.style.padding = "8px 16px";
+  cancelBtn.style.background = "#444";
+  cancelBtn.style.color = "#fff";
+  cancelBtn.style.border = "none";
+  cancelBtn.style.borderRadius = "4px";
+  cancelBtn.style.cursor = "pointer";
+  cancelBtn.onclick = () => modal.remove();
+  btnContainer.appendChild(cancelBtn);
+
+  const confirmBtn = document.createElement("button");
+  confirmBtn.innerText = "OK - Delete Permanently";
+  confirmBtn.style.padding = "8px 16px";
+  confirmBtn.style.background = "#c33";
+  confirmBtn.style.color = "#fff";
+  confirmBtn.style.border = "none";
+  confirmBtn.style.borderRadius = "4px";
+  confirmBtn.style.cursor = "pointer";
+  confirmBtn.onclick = async () => {
+    confirmBtn.disabled = true;
+    confirmBtn.innerText = "Deleting...";
+    
+    try {
+      const res = await fetch("/api/admin/delete-ship", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shipText: msg.text })
+      });
+
+      if (res.ok) {
+        modal.remove();
+        // Refresh the panel
+        fetchAllMessages(panel);
+      } else if (res.status === 401) {
+        alert("Unauthorized. Please re-authenticate as admin.");
+        modal.remove();
+      } else {
+        alert(`Failed to delete: ${res.status}`);
+        confirmBtn.disabled = false;
+        confirmBtn.innerText = "OK - Delete Permanently";
+      }
+    } catch (err) {
+      alert("Error: " + err.message);
+      confirmBtn.disabled = false;
+      confirmBtn.innerText = "OK - Delete Permanently";
+    }
+  };
+  btnContainer.appendChild(confirmBtn);
+
+  dialog.appendChild(btnContainer);
+  modal.appendChild(dialog);
+  document.body.appendChild(modal);
+
+  // Close on escape
+  const escHandler = (e) => {
+    if (e.key === "Escape") {
+      modal.remove();
+      document.removeEventListener("keydown", escHandler);
+    }
+  };
+  document.addEventListener("keydown", escHandler);
+}
+
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
 }
