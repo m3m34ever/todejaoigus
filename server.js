@@ -19,6 +19,15 @@ const EMAIL_FROM = process.env.EMAIL_FROM || `no-reply@${process.env.DOMAIN || "
 const clientRateMap = new Map(); // IP -> { count, resetTime }
 const RATE_LIMIT_WINDOW = 60000; // 1 minute
 const RATE_LIMIT_MAX_MESSAGES = 10; // max messages per window
+const sessionsDir = './data/sessions';
+try {
+  if (!fs.existsSync(sessionsDir)) {
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    console.log(`[SESSIONS] Created sessions directory: ${sessionsDir}`);
+  }
+} catch (err) {
+  console.error(`[SESSIONS] Failed to create sessions directory:`, err);
+}
 
 let mailer;
 if (process.env.EMAIL_SMTP_HOST && process.env.EMAIL_SMTP_USER) {
@@ -81,7 +90,8 @@ app.use(session({
   store: new fileStore({
     path: './data/sessions',    // Store sessions in data folder
     retries: 2,
-    secret: 'session-secret'    // Additional encryption
+    secret: 'session-secret',    // Additional encryption
+    logFn: function() {} // disable logging
   }),
   secret: process.env.SESSION_SECRET || crypto.randomBytes(64).toString('hex'),
   resave: false,
