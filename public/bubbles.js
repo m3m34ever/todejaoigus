@@ -2377,64 +2377,6 @@ document.addEventListener("DOMContentLoaded", () => {
     // Register cleanup handlers
     window.addEventListener('beforeunload', cleanupHandler);
     
-    // Visibility change handler
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) {
-        console.log('[VISIBILITY] Page hidden, pausing videos for memory conservation');
-        
-        // Pause both videos to save resources
-        if (bg) {
-          try {
-            bg.pause();
-          } catch (e) {
-            console.warn('[VISIBILITY] Error pausing main video:', e);
-          }
-        }
-        
-        if (dualVideoSystem && dualVideoSystem.secondaryVideo) {
-          try {
-            dualVideoSystem.secondaryVideo.pause();
-          } catch (e) {
-            console.warn('[VISIBILITY] Error pausing secondary video:', e);
-          }
-        }
-        
-        // Stop dual video transitions while hidden
-        if (dualVideoSystem && dualVideoSystem.isActive) {
-          dualVideoSystem.isActive = false;
-          console.log('[VISIBILITY] Temporarily disabled dual video system');
-        }
-        
-      } else if (!document.hidden) {
-        console.log('[VISIBILITY] Page visible again, resuming videos');
-        
-        // Resume dual video system if it was active
-        if (dualVideoSystem && !dualVideoSystem.isActive) {
-          dualVideoSystem.isActive = true;
-          console.log('[VISIBILITY] Re-enabled dual video system');
-          
-          // Reset dual video state to ensure smooth transitions
-          if (dualVideoSystem.mainVideo && dualVideoSystem.secondaryVideo) {
-            dualVideoSystem.currentActive = 'main';
-            dualVideoSystem.mainVideo.style.opacity = '1';
-            dualVideoSystem.secondaryVideo.style.opacity = '0';
-            dualVideoSystem.mainVideo.style.zIndex = dualVideoSystem.mainVideo.closest('#circleVideoContainer') ? '1' : '-1';
-            dualVideoSystem.secondaryVideo.style.zIndex = dualVideoSystem.secondaryVideo.closest('#circleVideoContainer') ? '0' : '-2';
-            
-            // Resume both videos
-            Promise.all([
-              dualVideoSystem.mainVideo.play().catch(e => console.warn('[VISIBILITY] Error resuming main video:', e)),
-              dualVideoSystem.secondaryVideo.play().catch(e => console.warn('[VISIBILITY] Error resuming secondary video:', e))
-            ]).then(() => {
-              console.log('[VISIBILITY] Both videos resumed successfully');
-            });
-          }
-        } else if (bg && !dualVideoSystem) {
-          // Single video mode - just resume main video
-          bg.play().catch(e => console.warn('[VISIBILITY] Error resuming video:', e));
-        }
-      }
-    });
 
     // Error handler  
     window.addEventListener('error', (e) => {
