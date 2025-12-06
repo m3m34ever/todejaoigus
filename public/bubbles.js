@@ -31,7 +31,12 @@ async function preloadVideoFully(src) {
 
   console.log(`[VIDEO PRELOAD] Preloading video: ${src}`);
   try {
-    const response = await fetch(src);
+    // Use lower priority fetch to not compete with streaming video
+    const response = await fetch(src, {
+      priority: 'low',  // Hint to browser this is background fetch
+      cache: 'force-cache'  // Use cached version if available
+    });
+    
     if (!response.ok) {
       throw new Error(`Failed to fetch ${src}: ${response.status}`);
     }
@@ -51,17 +56,23 @@ async function preloadVideoFully(src) {
 
 // Preload all video variants into memory
 async function preloadAllVideos() {
-  console.log('[PRELOAD] Starting full video preload...');
+  console.log('[PRELOAD] Starting sequential video preload...');
   
-  const promises = videoVariants.map(v => preloadVideoFully(v.src));
+  // Preload current variant first (highest priority)
+  const currentSrc = videoVariants[currentBgVariant].src;
+  await preloadVideoFully(currentSrc);
   
-  try {
-    await Promise.all(promises);
-    preloadingComplete = true;
-    console.log('[PRELOAD] All videos fully loaded into memory!');
-  } catch (e) {
-    console.error('[PRELOAD] Some videos failed to preload:', e);
+  // Then preload others sequentially (not in parallel) to avoid bandwidth competition
+  for (const variant of videoVariants) {
+    if (variant.src !== currentSrc) {
+      await preloadVideoFully(variant.src);
+      // Small delay between fetches to let streaming video breathe
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
   }
+  
+  preloadingComplete = true;
+  console.log('[PRELOAD] All videos fully loaded into memory!');
 }
 
 // Get blob URL for a video source (returns original if not preloaded)
@@ -1337,19 +1348,35 @@ document.addEventListener("DOMContentLoaded", () => {
       console.log(`[VIDEO] Initial source set (streaming): ${videoVariants[currentBgVariant].src}`);
     }
     
-    // Start preloading all videos in background
-    preloadAllVideos().then(() => {
-      // Once preloaded, upgrade current video to blob URL
-      upgradeVideoToBlob(bg);
+    // Ensure video starts playing ASAP
+    bg.preload = 'auto';
+    bg.muted = true;
+    
+    // Try to play immediately
+    const playPromise = bg.play();
+    if (playPromise) {
+      playPromise.catch(e => {
+        console.log('[VIDEO] Initial autoplay blocked, waiting for user gesture');
+      });
+    }
+    
+    // DELAY preloading to let streaming video start first
+    setTimeout(() => {
+      console.log('[PRELOAD] Starting background preload after video begins playing...');
       
-      // Also upgrade secondary video if dual video system is active
-      const secondary = document.getElementById("bgVideoSecondary");
-      if (secondary) {
-        upgradeVideoToBlob(secondary);
-      }
-      
-      console.log('[VIDEO] All videos cached - playback is now fully offline-capable');
-    });
+      preloadAllVideos().then(() => {
+        // Once preloaded, upgrade current video to blob URL
+        upgradeVideoToBlob(bg);
+        
+        // Also upgrade secondary video if dual video system is active
+        const secondary = document.getElementById("bgVideoSecondary");
+        if (secondary) {
+          upgradeVideoToBlob(secondary);
+        }
+        
+        console.log('[VIDEO] All videos cached - playback is now fully offline-capable');
+      });
+    }, 3000);
     
     let dualVideoSystem = null;
     let staticCanvas = null;
