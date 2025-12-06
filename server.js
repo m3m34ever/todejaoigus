@@ -11,6 +11,8 @@ import rateLimit from 'express-rate-limit';
 import DOMPurify from 'isomorphic-dompurify';
 import crypto from 'crypto';
 import FileStore from 'session-file-store';
+import { exec } from "child_process";
+import { promisify } from "util";
 
 dotenv.config();
 
@@ -581,3 +583,109 @@ server.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
 
+const execAsync = promisify(exec);
+
+// Generate fallback images from video files on server startup
+async function generateVideoFallbackImages() {
+  const videoFiles = [
+    { video: "background.mp4", output: "video-fallback-1080.jpg", width: 1920 },
+    { video: "background-720.mp4", output: "video-fallback-720.jpg", width: 1280 },
+    { video: "background-480.mp4", output: "video-fallback-480.jpg", width: 854 }
+  ];
+  
+  console.log("[FALLBACK] Generating video fallback images...");
+  
+  for (const { video, output, width } of videoFiles) {
+    const videoPath = `./public/${video}`;
+    const outputPath = `./public/${output}`;
+    
+    try {
+      // Check if video file exists
+      if (!fs.existsSync(videoPath)) {
+        console.log(`[FALLBACK] Video file not found: ${videoPath}, skipping`);
+        continue;
+      }
+      
+      // Check if fallback already exists and is recent (within 24 hours)
+      if (fs.existsSync(outputPath)) {
+        const stats = fs.statSync(outputPath);
+        const ageHours = (Date.now() - stats.mtimeMs) / (1000 * 60 * 60);
+        if (ageHours < 24) {
+          console.log(`[FALLBACK] ${output} already exists and is recent, skipping`);
+          continue;
+        }
+      }
+      
+      // Generate fallback image using ffmpeg
+      // Capture frame at 2 seconds, apply slight blur for smoother loop transition appearance
+      const command = `ffmpeg -y -ss 2 -i "${videoPath}" -vframes 1 -vf "gblur=sigma=0.5" -q:v 2 "${outputPath}"`;
+      
+      console.log(`[FALLBACK] Generating ${output} from ${video}...`);
+      await execAsync(command);
+      
+      const outputStats = fs.statSync(outputPath);
+      const sizeMB = (outputStats.size / (1024 * 1024)).toFixed(2);
+      console.log(`[FALLBACK] Generated ${output} (${sizeMB} MB)`);
+      
+    } catch (e) {
+      console.error(`[FALLBACK] Failed to generate ${output}:`, e.message);
+      
+      // If ffmpeg fails, try without blur filter
+      try {
+        const simpleCommand = `ffmpeg -y -ss 2 -i "${videoPath}" -vframes 1 -q:v 2 "${outputPath}"`;
+        await execAsync(simpleCommand);
+        console.log(`[FALLBACK] Generated ${output} (without blur)`);
+      } catch (e2) {
+        console.error(`[FALLBACK] Simple generation also failed for ${output}:`, e2.message);
+      }
+    }
+  }
+  
+  console.log("[FALLBACK] Video fallback image generation complete");
+}
+
+// Call on server startup (after other initialization)
+generateVideoFallbackImages().catch(e => {
+  console.error("[FALLBACK] Error during fallback generation:", e);
+});
+
+// API to get appropriate fallback image path based on screen width
+app.get("/api/video-fallback", async (req, res) => {
+  const width = parseInt(req.query.width) || 1920;
+  
+  let fallbackFile;
+  if (width <= 854) {
+    fallbackFile = "video-fallback-480.jpg";
+  } else if (width <= 1280) {
+    fallbackFile = "video-fallback-720.jpg";
+  } else {
+    fallbackFile = "video-fallback-1080.jpg";
+  }
+  
+  const filePath = `./public/${fallbackFile}`;
+  
+  // If file doesn't exist, try to generate it on-demand
+  if (!fs.existsSync(filePath)) {
+    console.log(`[FALLBACK] ${fallbackFile} not found, attempting on-demand generation...`);
+    await generateVideoFallbackImages();
+  }
+  
+  // Check again after potential generation
+  if (fs.existsSync(filePath)) {
+    res.json({ 
+      ok: true, 
+      fallback: fallbackFile,
+      width: width
+    });
+  } else {
+    // Fallback to any available image
+    const fallbacks = ["video-fallback-1080.jpg", "video-fallback-720.jpg", "video-fallback-480.jpg"];
+    for (const fb of fallbacks) {
+      if (fs.existsSync(`./public/${fb}`)) {
+        res.json({ ok: true, fallback: fb, width: width });
+        return;
+      }
+    }
+    res.json({ ok: false, error: "No fallback images available" });
+  }
+});
