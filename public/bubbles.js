@@ -349,6 +349,10 @@ function showOverlay(text){
   overlay.onclick = ()=> overlay.style.display="none";
 }
 
+let _originalVideoParent = null;
+let _originalVideoNextSibling = null;
+let _originalVideoStyles = null;
+
 function createCircleOverlay() {
   if (circleOverlayEl) return circleOverlayEl;
   const overlay = document.createElement("div");
@@ -382,77 +386,12 @@ function createCircleOverlay() {
 
   overlay.appendChild(circle);
 
-  const bgVideo = document.getElementById("bgVideo");
-  if (bgVideo && bgVideo instanceof HTMLVideoElement) {
-    const v = document.createElement("video");
-    try { 
-      v.src = bgVideo.currentSrc || videoVariants[currentBgVariant].src || "";
-    } catch (e) { 
-      v.src = videoVariants[currentBgVariant].src || "";
-    }
-    v.autoplay = true;
-    v.muted = true;
-    v.loop = true;
-    v.playsInline = true;
-    v.style.width = "100%";
-    v.style.height = "100%";
-    v.style.objectFit = "cover";
-    circle.appendChild(v);
-    v.play().catch(()=>{});
-
-    // Monitor the circle video performance
-    (function startCircleVideoQualityMonitor(){
-      const intervalMs = 3000;
-      const lowFpsThreshold = 20;
-      let switched = false;
-
-      console.log("[CIRCLE VIDEO] Starting quality monitor...");
-
-      if (typeof v.getVideoPlaybackQuality === "function") {
-        console.log("[CIRCLE VIDEO] Using getVideoPlaybackQuality");
-        let lastTotal = 0;
-        let lastDropped = 0;
-        setInterval(() => {
-          try {
-            const q = v.getVideoPlaybackQuality();
-            const total = q.totalVideoFrames || 0;
-            const dropped = q.droppedVideoFrames || 0;
-            const totalDelta = total - lastTotal;
-            const droppedDelta = dropped - lastDropped;
-            lastTotal = total; lastDropped = dropped;
-            
-            if (totalDelta > 0) {
-              const fps = totalDelta / (intervalMs/1000);
-              const dropRatio = droppedDelta / Math.max(1, totalDelta);
-              console.log(`[CIRCLE VIDEO] FPS: ${fps.toFixed(1)}, Drop ratio: ${(dropRatio*100).toFixed(1)}%, Current: ${videoVariants[currentBgVariant].src}`);
-              
-              if ((fps < lowFpsThreshold || dropRatio > 0.12) && !switched && currentBgVariant < videoVariants.length - 1) {
-                console.log(`[CIRCLE VIDEO] Performance issue detected - switching down from variant ${currentBgVariant}`);
-                switched = true;
-                setBgVideoVariant(currentBgVariant + 1, "performance");
-                // Update circle video source too
-                setTimeout(() => {
-                  try {
-                    v.src = videoVariants[currentBgVariant].src;
-                    v.load();
-                    v.play().catch(()=>{});
-                  } catch (e) { console.error("[CIRCLE VIDEO] Failed to update circle video src:", e); }
-                }, 100);
-              }
-            }
-          } catch (e) { 
-            console.error("[CIRCLE VIDEO] Quality monitoring error:", e);
-          }
-        }, intervalMs);
-      }
-    })();
-  } else {
-    const p = document.createElement("div");
-    p.style.color = "#fff";
-    p.style.padding = "24px";
-    p.innerText = "Preview unavailable";
-    circle.appendChild(p);
-  }
+  const videoContainer = document.createElement("div");
+  videoContainer.id = "circleVideoContainer";
+  videoContainer.style.width = "100%";
+  videoContainer.style.height = "100%";
+  videoContainer.style.position = "relative";
+  circle.appendChild(videoContainer);
 
   overlay.addEventListener("click", (e) => e.stopPropagation());
   document.body.appendChild(overlay);
@@ -614,6 +553,7 @@ async function toggleCircleMode(force) {
   const isActive = el.classList.contains("active");
   const shouldActivate = (typeof force === "boolean") ? force : !isActive;
   const inputBox = document.getElementById("inputBox");
+  const bgVideo = document.getElementById("bgVideo");
 
   if (shouldActivate) {
 
@@ -663,17 +603,45 @@ async function toggleCircleMode(force) {
         }
       }
     });
-    
+
     saveMessagesToLog();
 
-    // Create all ships in circle from the complete messages array
     messages.forEach(m => {
       createShip(m, circle);
     });
 
     if (bgVideo) {
-      bgVideo.pause();
-      bgVideo.style.display = "none";
+      // save original position info for restoration
+      _originalVideoParent = bgVideo.parentNode;
+      _originalVideoNextSibling = bgVideo.nextSibling;
+      _originalVideoStyles = {
+        position: bgVideo.style.position,
+        inset: bgVideo.style.inset,
+        width: bgVideo.style.width,
+        height: bgVideo.style.height,
+        objectFit: bgVideo.style.objectFit,
+        zIndex: bgVideo.style.zIndex
+      };
+      
+      const videoContainer = circle.querySelector("#circleVideoContainer");
+      if (videoContainer) {
+        // Restyle video for circle display
+        bgVideo.style.position = "relative";
+        bgVideo.style.inset = "auto";
+        bgVideo.style.width = "100%";
+        bgVideo.style.height = "100%";
+        bgVideo.style.objectFit = "cover";
+        bgVideo.style.zIndex = "auto";
+        
+        videoContainer.appendChild(bgVideo);
+        
+        // Ensure video keeps playing
+        if (bgVideo.paused) {
+          bgVideo.play().catch(() => {});
+        }
+        
+        console.log("[CIRCLE] Moved background video into circle (single video element)");
+      }
     }
 
     // start animation loop for circleShips
@@ -684,41 +652,32 @@ async function toggleCircleMode(force) {
         const centerX = rect.width / 2;
         const centerY = rect.height / 2;
         const radius = Math.min(centerX, centerY) - 40;
-        const shipSize = 150; // INCREASED - ships must be completely hidden before wrapping
+        const shipSize = 150;
         const exitRadius = radius + shipSize;
         
         for (let div of circleShips) {
-          // Initialize position within circle if not set
           if (typeof div.x !== "number" || typeof div.y !== "number") {
             const angle = Math.random() * 2 * Math.PI;
-            const r = Math.random() * (radius - 30); // Keep ships well inside initially
+            const r = Math.random() * (radius - 30);
             div.x = centerX + Math.cos(angle) * r;
             div.y = centerY + Math.sin(angle) * r;
           }
           
-          // Update position
           div.x += div.vx + Math.sin(Date.now()*0.001 + div.x) * 0.2;
           div.y += div.vy + Math.cos(Date.now()*0.001 + div.y) * 0.2;
 
-          // Check if ship is COMPLETELY outside the visible circle
           const dx = div.x - centerX;
           const dy = div.y - centerY;
           const distanceFromCenter = Math.sqrt(dx * dx + dy * dy);
           
           if (distanceFromCenter > exitRadius) {
-            // Ship is completely hidden - wrap to opposite side
             const exitAngle = Math.atan2(dy, dx);
             const entryAngle = exitAngle + Math.PI;
-            
-            // Place ship well outside on opposite side
             const entryDistance = radius + (shipSize * 0.9);
             div.x = centerX + Math.cos(entryAngle) * entryDistance;
             div.y = centerY + Math.sin(entryAngle) * entryDistance;
-            
-            console.log(`[CIRCLE] Ship wrapped at distance ${distanceFromCenter.toFixed(1)} -> ${entryDistance.toFixed(1)}`);
           }
 
-          // Apply position and rotation
           div.style.left = div.x + "px";
           div.style.top = div.y + "px";
           div.style.transform = `rotate(${div.angle}deg)`;
@@ -740,6 +699,43 @@ async function toggleCircleMode(force) {
     }
     try { await exitPromise; } catch (_) { /* ignore */ }
 
+    if (bgVideo && _originalVideoParent) {
+      // Restore original styles
+      if (_originalVideoStyles) {
+        bgVideo.style.position = _originalVideoStyles.position || "fixed";
+        bgVideo.style.inset = _originalVideoStyles.inset || "0";
+        bgVideo.style.width = _originalVideoStyles.width || "100vw";
+        bgVideo.style.height = _originalVideoStyles.height || "100dvh";
+        bgVideo.style.objectFit = _originalVideoStyles.objectFit || "cover";
+        bgVideo.style.zIndex = _originalVideoStyles.zIndex || "0";
+      } else {
+        // Fallback to default styles
+        bgVideo.style.position = "fixed";
+        bgVideo.style.inset = "0";
+        bgVideo.style.width = "100vw";
+        bgVideo.style.height = "100dvh";
+        bgVideo.style.objectFit = "cover";
+        bgVideo.style.zIndex = "0";
+      }
+      
+      if (_originalVideoNextSibling && _originalVideoNextSibling.parentNode === _originalVideoParent) {
+        _originalVideoParent.insertBefore(bgVideo, _originalVideoNextSibling);
+      } else {
+        _originalVideoParent.appendChild(bgVideo);
+      }
+      
+      // Ensure video keeps playing
+      if (bgVideo.paused) {
+        bgVideo.play().catch(() => {});
+      }
+      
+      console.log("[CIRCLE] Moved background video back to original position");
+      
+      _originalVideoParent = null;
+      _originalVideoNextSibling = null;
+      _originalVideoStyles = null;
+    }
+
     // remove circle ships and stop animation
     for (const s of circleShips) if (s && s.remove) s.remove();
     circleShips = [];
@@ -759,10 +755,7 @@ async function toggleCircleMode(force) {
       const t = document.getElementById("textInput");
       if (t) t.style.display = "";
     }
-    if (bgVideo) {
-      bgVideo.style.display = "";
-      bgVideo.play().catch(()=>{});
-    }
+    
     // also ensure textInput is shown (defensive)
     const t2 = document.getElementById("textInput");
     if (t2) t2.style.display = "";
