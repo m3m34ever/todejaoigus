@@ -20,6 +20,101 @@ const videoVariants = [
   { src: "background-480.mp4", width: 854 }
 ];
 
+const preloadedVideoBlobs = new Map();
+let preloadingComplete = false;
+
+async function preloadVideoFully(src) {
+  if (preloadedVideoBlobs.has(src)) {
+    console.log(`[VIDEO PRELOAD] Already preloaded: ${src}`);
+    return preloadedVideoBlobs.get(src);
+  }
+
+  console.log(`[VIDEO PRELOAD] Preloading video: ${src}`);
+  try {
+    const response = await fetch(src);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch ${src}: ${response.status}`);
+    }
+
+    const blob = await response.blob();
+    const blobUrl = URL.createObjectURL(blob);
+
+    preloadedVideoBlobs.set(src, blobUrl);
+    const sizeMB = (blob.size / (1024 * 1024)).toFixed(2);
+    console.log(`[VIDEO PRELOAD] Preloaded ${src} (${sizeMB} MB)`);
+    return blobUrl;
+  } catch (e) {
+    console.error(`[VIDEO PRELOAD] Error preloading ${src}:`, e);
+    return null;
+  }
+}
+
+// Preload all video variants into memory
+async function preloadAllVideos() {
+  console.log('[PRELOAD] Starting full video preload...');
+  
+  const promises = videoVariants.map(v => preloadVideoFully(v.src));
+  
+  try {
+    await Promise.all(promises);
+    preloadingComplete = true;
+    console.log('[PRELOAD] All videos fully loaded into memory!');
+  } catch (e) {
+    console.error('[PRELOAD] Some videos failed to preload:', e);
+  }
+}
+
+// Get blob URL for a video source (returns original if not preloaded)
+function getPreloadedVideoSrc(src) {
+  return preloadedVideoBlobs.get(src) || src;
+}
+
+// Upgrade a playing video to use blob URL when available
+function upgradeVideoToBlob(videoElement) {
+  if (!videoElement || !videoElement.src) return;
+  
+  // Find original src from current video src
+  let originalSrc = null;
+  
+  // Check if already using blob
+  if (videoElement.src.startsWith('blob:')) {
+    return; // Already using blob
+  }
+  
+  // Find matching variant
+  for (const variant of videoVariants) {
+    if (videoElement.src.includes(variant.src) || videoElement.src.endsWith(variant.src)) {
+      originalSrc = variant.src;
+      break;
+    }
+  }
+  
+  if (!originalSrc) {
+    // Try to extract filename from full URL
+    try {
+      const url = new URL(videoElement.src);
+      originalSrc = url.pathname.split('/').pop();
+    } catch (e) {
+      return;
+    }
+  }
+  
+  const blobUrl = preloadedVideoBlobs.get(originalSrc);
+  if (blobUrl && blobUrl !== videoElement.src) {
+    const currentTime = videoElement.currentTime;
+    const wasPaused = videoElement.paused;
+    
+    console.log(`[VIDEO UPGRADE] Upgrading ${originalSrc} to blob URL at ${currentTime.toFixed(2)}s`);
+    
+    videoElement.src = blobUrl;
+    videoElement.currentTime = currentTime;
+    
+    if (!wasPaused) {
+      videoElement.play().catch(() => {});
+    }
+  }
+}
+
 function chooseInitialVariantIndex() {
   try {
     const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
@@ -44,7 +139,9 @@ function setBgVideoVariant(idx, reason = "manual") {
   const wasPaused = bgVideo.paused;
   try {
     bgVideo.pause();
-    bgVideo.src = videoVariants[idx].src;
+    const originalSrc = videoVariants[idx].src;
+    const blobSrc = getPreloadedVideoSrc(originalSrc);
+    bgVideo.src = blobSrc;
     bgVideo.load();
     if (!wasPaused) {
       setTimeout(() => bgVideo.play().catch(()=>{}), 50);
@@ -58,7 +155,7 @@ function setBgVideoVariant(idx, reason = "manual") {
         timestamp: new Date().toISOString()
       });
     }
-    console.log(`[VIDEO] Switched from ${videoVariants[prevVariant]?.src} to ${videoVariants[idx].src} (${reason})`);
+    console.log(`[VIDEO] Switched from ${videoVariants[prevVariant]?.src} to ${originalSrc} (${reason}) - using ${blobSrc.startsWith('blob:') ? 'preloaded blob' : 'network'}`);
   } catch (e) {
     console.error("Failed to switch video variant:", e);
   }
@@ -1234,9 +1331,25 @@ document.addEventListener("DOMContentLoaded", () => {
   (function setupBgPlayButton(){
     const bg = document.getElementById("bgVideo");
     if (!bg) return;
+    // preload videos first then set source
+    if (!bg.src) {
+      bg.src = videoVariants[currentBgVariant].src;
+      console.log(`[VIDEO] Initial source set (streaming): ${videoVariants[currentBgVariant].src}`);
+    }
     
-    // Set video source FIRST
-    if (!bg.src) bg.src = videoVariants[currentBgVariant].src;
+    // Start preloading all videos in background
+    preloadAllVideos().then(() => {
+      // Once preloaded, upgrade current video to blob URL
+      upgradeVideoToBlob(bg);
+      
+      // Also upgrade secondary video if dual video system is active
+      const secondary = document.getElementById("bgVideoSecondary");
+      if (secondary) {
+        upgradeVideoToBlob(secondary);
+      }
+      
+      console.log('[VIDEO] All videos cached - playback is now fully offline-capable');
+    });
     
     let dualVideoSystem = null;
     let staticCanvas = null;
@@ -1585,7 +1698,10 @@ document.addEventListener("DOMContentLoaded", () => {
           // Create secondary video element
           this.secondaryVideo = document.createElement('video');
           this.secondaryVideo.id = 'bgVideoSecondary';
-          this.secondaryVideo.src = this.mainVideo.src;
+          const originalSrc = videoVariants[currentBgVariant].src;
+          const srcToUse = getPreloadedVideoSrc(originalSrc);
+          this.secondaryVideo.src = srcToUse;
+          console.log(`[DUAL VIDEO] Secondary video source: ${srcToUse.startsWith('blob:') ? 'preloaded blob' : 'streaming'}`);
           this.secondaryVideo.muted = true;
           this.secondaryVideo.playsInline = true;
           this.secondaryVideo.preload = 'auto';
@@ -1610,6 +1726,17 @@ document.addEventListener("DOMContentLoaded", () => {
           this.secondaryVideo.loop = false;
 
           this.mainVideo.style.mixBlendMode = 'normal';
+
+          if (!preloadingComplete) {
+            const checkAndUpgrade = setInterval(() => {
+              if (preloadingComplete) {
+                clearInterval(checkAndUpgrade);
+                upgradeVideoToBlob(this.mainVideo);
+                upgradeVideoToBlob(this.secondaryVideo);
+                console.log('[DUAL VIDEO] Upgraded both videos to blob URLs');
+              }
+            }, 1000);
+          }
           
           this.setupEventListeners();
           this.isActive = true;
@@ -1813,10 +1940,11 @@ document.addEventListener("DOMContentLoaded", () => {
           console.log(`[DUAL VIDEO] Updating blend-mode sources to ${newSrc}`);
           
           const wasPlaying = !this.mainVideo.paused || !this.secondaryVideo.paused;
-          
+          const blobSrc = getPreloadedVideoSrc(newSrc);
+
           // Update both video sources
-          this.mainVideo.src = newSrc;
-          this.secondaryVideo.src = newSrc;
+          this.mainVideo.src = blobSrc;
+          this.secondaryVideo.src = blobSrc;
           
           // Reset to main video
           this.currentActive = 'main';
@@ -1836,6 +1964,8 @@ document.addEventListener("DOMContentLoaded", () => {
               this.mainVideo.play().catch(() => {});
             }, 100);
           }
+          console.log(`[DUAL VIDEO] Sources updated to ${blobSrc.startsWith('blob:') ? 'preloaded blob' : 'network'}`);
+
         }
         
         handleError() {
@@ -2203,6 +2333,19 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       } catch (e) {
         console.error('[CLEANUP] Error clearing fallback cache:', e);
+      }
+
+      try {
+        // Revoke all preloaded blob URLs to free memory
+        for (const [src, blobUrl] of preloadedVideoBlobs.entries()) {
+          if (blobUrl.startsWith('blob:')) {
+            URL.revokeObjectURL(blobUrl);
+            console.log(`[CLEANUP] Revoked blob URL for ${src}`);
+          }
+        }
+        preloadedVideoBlobs.clear();
+      } catch (e) {
+        console.error('[CLEANUP] Error revoking blob URLs:', e);
       }
       
       try {
