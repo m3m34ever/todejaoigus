@@ -29,13 +29,23 @@ async function preloadVideoFully(src) {
     return preloadedVideoBlobs.get(src);
   }
 
+  // Detect iOS
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+                (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
   console.log(`[VIDEO PRELOAD] Preloading video: ${src}`);
   try {
     // Use lower priority fetch to not compete with streaming video
-    const response = await fetch(src, {
-      priority: 'low',  // Hint to browser this is background fetch
-      cache: 'force-cache'  // Use cached version if available
-    });
+    const fetchOptions = {
+      cache: 'force-cache'
+    };
+    
+    // Only add priority hint if supported (not on older iOS)
+    if (!isIOS) {
+      fetchOptions.priority = 'low';
+    }
+    
+    const response = await fetch(src, fetchOptions);
     
     if (!response.ok) {
       throw new Error(`Failed to fetch ${src}: ${response.status}`);
@@ -1351,6 +1361,24 @@ document.addEventListener("DOMContentLoaded", () => {
     // Ensure video starts playing ASAP
     bg.preload = 'auto';
     bg.muted = true;
+    bg.playsInline = true;
+    bg.setAttribute('playsinline', ''); // for iOS
+    bg.setAttribute('webkit-playsinline', ''); // for older iOS
+
+    const tryPlayVideo = () => {
+      if (bg.paused) {
+        bg.play().catch(e => {
+          console.log('[VIDEO] Autoplay attempt failed:', e);
+        });
+      }
+    };
+
+    tryPlayVideo();
+
+    if (isIOS) {
+      bg.addEventListener('canplaythrough', tryPlayVideo, { once: true });
+      bg.addEventListener('loadeddata', tryPlayVideo, { once: true });
+    }
     
     // Try to play immediately
     const playPromise = bg.play();
@@ -1360,23 +1388,39 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     }
     
-    // DELAY preloading to let streaming video start first
     setTimeout(() => {
       console.log('[PRELOAD] Starting background preload after video begins playing...');
       
-      preloadAllVideos().then(() => {
-        // Once preloaded, upgrade current video to blob URL
-        upgradeVideoToBlob(bg);
-        
-        // Also upgrade secondary video if dual video system is active
-        const secondary = document.getElementById("bgVideoSecondary");
-        if (secondary) {
-          upgradeVideoToBlob(secondary);
-        }
-        
-        console.log('[VIDEO] All videos cached - playback is now fully offline-capable');
-      });
-    }, 3000);
+      // On iOS, only preload current variant initially to reduce memory pressure
+      if (isIOS) {
+        preloadVideoFully(videoVariants[currentBgVariant].src).then(() => {
+          upgradeVideoToBlob(bg);
+          console.log('[VIDEO] Current video cached - iOS mode');
+          
+          // Preload others after a longer delay on iOS
+          setTimeout(() => {
+            preloadAllVideos().then(() => {
+              const secondary = document.getElementById("bgVideoSecondary");
+              if (secondary) {
+                upgradeVideoToBlob(secondary);
+              }
+              console.log('[VIDEO] All videos cached - playback is now fully offline-capable');
+            });
+          }, 10000); // Wait 10 more seconds before loading other variants on iOS
+        });
+      } else {
+        preloadAllVideos().then(() => {
+          upgradeVideoToBlob(bg);
+          
+          const secondary = document.getElementById("bgVideoSecondary");
+          if (secondary) {
+            upgradeVideoToBlob(secondary);
+          }
+          
+          console.log('[VIDEO] All videos cached - playback is now fully offline-capable');
+        });
+      }
+    }, preloadDelay);
     
     let dualVideoSystem = null;
     let staticCanvas = null;
@@ -1425,6 +1469,11 @@ document.addEventListener("DOMContentLoaded", () => {
       bg.loop = false;
       bg.removeAttribute("loop");
       
+      // iOS-specific: ensure playsinline is set
+      bg.playsInline = true;
+      bg.setAttribute('playsinline', '');
+      bg.setAttribute('webkit-playsinline', '');
+
       // Create canvas that's ALWAYS visible as background layer
       staticCanvas = document.createElement("canvas");
       staticCanvas.id = "safariStaticFallback";
