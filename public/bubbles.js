@@ -1542,8 +1542,8 @@ document.addEventListener("DOMContentLoaded", () => {
             fallbackReady = true;
             console.log("[SAFARI] Simple fallback generated and cached");
             
-            // Enhanced version with blending
-            setTimeout(generateEnhancedFallback, 1000);
+            // Start progressive frame collection (no seeking, captures during natural playback)
+            startProgressiveFrameCollection();
             
           } catch (e) {
             console.error("[SAFARI] Immediate fallback failed:", e);
@@ -1554,110 +1554,152 @@ document.addEventListener("DOMContentLoaded", () => {
         attemptGeneration();
       };
       
-      // Enhanced fallback with texture-preserving multi-frame blending
-      const generateEnhancedFallback = async () => {
-        if (!bg || bg.readyState < 2) return;
+      // Progressive frame collection - captures frames during natural playback without seeking
+      const collectedFrames = [];
+      let frameCollectionComplete = false;
+      
+      const startProgressiveFrameCollection = () => {
+        if (frameCollectionComplete) return;
         
-        try {
-          console.log("[SAFARI] Generating blurred intermediate fallback");
-          
-          const originalTime = bg.currentTime;
-          const wasPlaying = !bg.paused;
-          
-          // Capture just 3 strategic frames for blending
-          const frameTimes = [
-            0.1,                                    // Start frame
-            bg.duration * 0.5,                     // Middle frame  
-            Math.max(0, bg.duration - 0.3)        // End frame
-          ];
-          
-          const frames = [];
-          
-          for (const time of frameTimes) {
-            bg.currentTime = time;
-            
-            await new Promise(resolve => {
-              const onSeeked = () => {
-                bg.removeEventListener('seeked', onSeeked);
-                resolve();
-              };
-              bg.addEventListener('seeked', onSeeked);
-              setTimeout(resolve, 400);
-            });
-            
-            const tempCanvas = document.createElement("canvas");
-            tempCanvas.width = bg.videoWidth;
-            tempCanvas.height = bg.videoHeight;
-            const tempCtx = tempCanvas.getContext("2d");
-            tempCtx.drawImage(bg, 0, 0);
-            
-            frames.push(tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height));
-            tempCanvas.remove();
-            
-            console.log(`[SAFARI] Captured frame at ${time.toFixed(2)}s`);
+        console.log("[SAFARI] Starting progressive frame collection (no seeking)");
+        
+        const targetFrameCount = 5;
+        const videoDuration = bg.duration || 10;
+        const frameInterval = videoDuration / targetFrameCount;
+        let lastCaptureTime = -frameInterval; // Allow immediate first capture
+        
+        const captureFrame = () => {
+          if (frameCollectionComplete || !bg || bg.paused || bg.readyState < 2) {
+            return;
           }
           
-          // Create blurred intermediate blend
+          const currentTime = bg.currentTime;
+          
+          // Only capture if enough time has passed since last capture
+          if (currentTime - lastCaptureTime >= frameInterval || 
+              (currentTime < lastCaptureTime && collectedFrames.length < targetFrameCount)) {
+            
+            try {
+              const tempCanvas = document.createElement("canvas");
+              tempCanvas.width = bg.videoWidth;
+              tempCanvas.height = bg.videoHeight;
+              const tempCtx = tempCanvas.getContext("2d");
+              tempCtx.drawImage(bg, 0, 0);
+              
+              const frameData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+              collectedFrames.push({
+                time: currentTime,
+                data: frameData
+              });
+              
+              lastCaptureTime = currentTime;
+              tempCanvas.remove();
+              
+              console.log(`[SAFARI] Captured frame ${collectedFrames.length}/${targetFrameCount} at ${currentTime.toFixed(2)}s`);
+              
+              // When we have enough frames, create the blended fallback
+              if (collectedFrames.length >= targetFrameCount) {
+                frameCollectionComplete = true;
+                createBlendedFallbackFromFrames();
+              }
+            } catch (e) {
+              console.error("[SAFARI] Frame capture error:", e);
+            }
+          }
+        };
+        
+        // Capture frames during timeupdate (no seeking required)
+        const frameCollectionHandler = () => {
+          if (!frameCollectionComplete) {
+            captureFrame();
+          }
+        };
+        
+        bg.addEventListener("timeupdate", frameCollectionHandler);
+        
+        // Also try to capture on video loop (when it resets to beginning)
+        bg.addEventListener("seeked", () => {
+          if (!frameCollectionComplete && bg.currentTime < 0.5) {
+            // Video looped back to start, good time to capture
+            setTimeout(captureFrame, 100);
+          }
+        });
+        
+        // Cleanup after collection is done or timeout
+        setTimeout(() => {
+          if (!frameCollectionComplete && collectedFrames.length >= 3) {
+            console.log("[SAFARI] Frame collection timeout, using available frames");
+            frameCollectionComplete = true;
+            createBlendedFallbackFromFrames();
+          }
+          bg.removeEventListener("timeupdate", frameCollectionHandler);
+        }, 30000); // 30 second timeout
+      };
+      
+      // Create blended fallback from collected frames (no seeking involved)
+      const createBlendedFallbackFromFrames = () => {
+        if (collectedFrames.length < 2) {
+          console.log("[SAFARI] Not enough frames for blending, keeping simple fallback");
+          return;
+        }
+        
+        console.log(`[SAFARI] Creating blended fallback from ${collectedFrames.length} frames`);
+        
+        try {
           const ctx = staticCanvas.getContext("2d");
-          const width = bg.videoWidth;
-          const height = bg.videoHeight;
+          const width = staticCanvas.width;
+          const height = staticCanvas.height;
           const blendedData = ctx.createImageData(width, height);
           const blendedPixels = blendedData.data;
           
-          // Simple averaging with gaussian-style weighting
+          // Calculate weights for each frame (distribute evenly)
+          const frameCount = collectedFrames.length;
+          const weight = 1 / frameCount;
+          
+          // Blend all frames together
           for (let i = 0; i < blendedPixels.length; i += 4) {
-            // Weight frames: start=30%, middle=40%, end=30%
-            const r0 = frames[0].data[i];
-            const g0 = frames[0].data[i + 1];
-            const b0 = frames[0].data[i + 2];
-            const a0 = frames[0].data[i + 3];
+            let totalR = 0, totalG = 0, totalB = 0, totalA = 0;
             
-            const r1 = frames[1].data[i];
-            const g1 = frames[1].data[i + 1];
-            const b1 = frames[1].data[i + 2];
-            const a1 = frames[1].data[i + 3];
+            for (const frame of collectedFrames) {
+              totalR += frame.data.data[i] * weight;
+              totalG += frame.data.data[i + 1] * weight;
+              totalB += frame.data.data[i + 2] * weight;
+              totalA += frame.data.data[i + 3] * weight;
+            }
             
-            const r2 = frames[2].data[i];
-            const g2 = frames[2].data[i + 1];
-            const b2 = frames[2].data[i + 2];
-            const a2 = frames[2].data[i + 3];
-            
-            // Weighted average (emphasizes middle frame for natural look)
-            blendedPixels[i] = Math.round(r0 * 0.3 + r1 * 0.4 + r2 * 0.3);
-            blendedPixels[i + 1] = Math.round(g0 * 0.3 + g1 * 0.4 + g2 * 0.3);
-            blendedPixels[i + 2] = Math.round(b0 * 0.3 + b1 * 0.4 + b2 * 0.3);
-            blendedPixels[i + 3] = Math.round(a0 * 0.3 + a1 * 0.4 + a2 * 0.3);
+            blendedPixels[i] = Math.round(totalR);
+            blendedPixels[i + 1] = Math.round(totalG);
+            blendedPixels[i + 2] = Math.round(totalB);
+            blendedPixels[i + 3] = Math.round(totalA);
           }
           
-          // Apply subtle blur for smoother transitions
-          const blurRadius = 1; // Small blur for natural softening
+          // Apply subtle blur for smoother appearance
+          const blurRadius = 1;
           const tempImageData = ctx.createImageData(width, height);
           tempImageData.data.set(blendedPixels);
           
-          // Simple box blur
           for (let y = blurRadius; y < height - blurRadius; y++) {
             for (let x = blurRadius; x < width - blurRadius; x++) {
               const centerIdx = (y * width + x) * 4;
               
-              let totalR = 0, totalG = 0, totalB = 0, totalA = 0;
+              let tR = 0, tG = 0, tB = 0, tA = 0;
               let count = 0;
               
-              // Sample surrounding pixels for blur
               for (let dy = -blurRadius; dy <= blurRadius; dy++) {
                 for (let dx = -blurRadius; dx <= blurRadius; dx++) {
                   const sampleIdx = ((y + dy) * width + (x + dx)) * 4;
-                  totalR += tempImageData.data[sampleIdx];
-                  totalG += tempImageData.data[sampleIdx + 1];
-                  totalB += tempImageData.data[sampleIdx + 2];
-                  totalA += tempImageData.data[sampleIdx + 3];
+                  tR += tempImageData.data[sampleIdx];
+                  tG += tempImageData.data[sampleIdx + 1];
+                  tB += tempImageData.data[sampleIdx + 2];
+                  tA += tempImageData.data[sampleIdx + 3];
                   count++;
                 }
               }
               
-              blendedPixels[centerIdx] = Math.round(totalR / count);
-              blendedPixels[centerIdx + 1] = Math.round(totalG / count);
-              blendedPixels[centerIdx + 2] = Math.round(totalB / count);
-              blendedPixels[centerIdx + 3] = Math.round(totalA / count);
+              blendedPixels[centerIdx] = Math.round(tR / count);
+              blendedPixels[centerIdx + 1] = Math.round(tG / count);
+              blendedPixels[centerIdx + 2] = Math.round(tB / count);
+              blendedPixels[centerIdx + 3] = Math.round(tA / count);
             }
           }
           
@@ -1670,21 +1712,15 @@ document.addEventListener("DOMContentLoaded", () => {
             height: staticCanvas.height
           });
           
-          // Restore video state
-          bg.currentTime = originalTime;
-          if (wasPlaying && bg.paused) {
-            bg.play().catch(() => {});
-          }
+          // Clear collected frames to free memory
+          collectedFrames.length = 0;
           
-          console.log("[SAFARI] Blurred intermediate fallback complete");
+          console.log("[SAFARI] Blended fallback complete (progressive, no-seek method)");
           
         } catch (e) {
-          console.error("[SAFARI] Blurred fallback failed:", e);
+          console.error("[SAFARI] Blended fallback creation failed:", e);
         }
       };
-      
-      // Start generation immediately
-      generateFallbackImmediately();
       
       // Also trigger on video events
       bg.addEventListener("loadeddata", generateFallbackImmediately);
