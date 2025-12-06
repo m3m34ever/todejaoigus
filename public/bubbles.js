@@ -1352,6 +1352,14 @@ document.addEventListener("DOMContentLoaded", () => {
   (function setupBgPlayButton(){
     const bg = document.getElementById("bgVideo");
     if (!bg) return;
+    
+    // Detect iOS
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+                  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    
+    // DELAY preloading more on iOS to let streaming video stabilize first
+    const preloadDelay = isIOS ? 5000 : 3000;
+    
     // preload videos first then set source
     if (!bg.src) {
       bg.src = videoVariants[currentBgVariant].src;
