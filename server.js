@@ -593,11 +593,12 @@ async function generateVideoFallbackImages() {
     { video: "background-480.mp4", output: "video-fallback-480.jpg", width: 854 }
   ];
   
-  console.log("[FALLBACK] Generating video fallback images...");
+  console.log("[FALLBACK] Generating blended video fallback images...");
   
   for (const { video, output, width } of videoFiles) {
     const videoPath = `./public/${video}`;
     const outputPath = `./public/${output}`;
+    const tempDir = `./public/temp_frames_${width}`;
     
     try {
       // Check if video file exists
@@ -616,27 +617,96 @@ async function generateVideoFallbackImages() {
         }
       }
       
-      // Generate fallback image using ffmpeg
-      // Capture frame at 2 seconds, apply slight blur for smoother loop transition appearance
-      const command = `ffmpeg -y -ss 2 -i "${videoPath}" -vframes 1 -vf "gblur=sigma=0.5" -q:v 2 "${outputPath}"`;
+      // Create temp directory for frames
+      if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true });
+      }
       
-      console.log(`[FALLBACK] Generating ${output} from ${video}...`);
-      await execAsync(command);
+      // Get video duration first
+      let duration = 10; // default
+      try {
+        const durationCmd = `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${videoPath}"`;
+        const { stdout } = await execAsync(durationCmd);
+        duration = parseFloat(stdout.trim()) || 10;
+        console.log(`[FALLBACK] Video duration: ${duration.toFixed(2)}s`);
+      } catch (e) {
+        console.log(`[FALLBACK] Could not get duration, using default ${duration}s`);
+      }
+      
+      // Extract 5 frames at different times throughout the video
+      const frameCount = 5;
+      const frameTimes = [];
+      for (let i = 0; i < frameCount; i++) {
+        // Spread frames evenly across the video (avoiding very start/end)
+        const time = (duration * 0.1) + (duration * 0.8 * i / (frameCount - 1));
+        frameTimes.push(time.toFixed(2));
+      }
+      
+      console.log(`[FALLBACK] Extracting ${frameCount} frames at times: ${frameTimes.join(', ')}s`);
+      
+      // Extract individual frames
+      for (let i = 0; i < frameTimes.length; i++) {
+        const frameCmd = `ffmpeg -y -ss ${frameTimes[i]} -i "${videoPath}" -vframes 1 -q:v 2 "${tempDir}/frame_${i}.png"`;
+        await execAsync(frameCmd);
+      }
+      
+      // Blend all frames together using ffmpeg's blend filter
+      // This creates a smooth average of all frames
+      const blendCmd = `ffmpeg -y \
+        -i "${tempDir}/frame_0.png" \
+        -i "${tempDir}/frame_1.png" \
+        -i "${tempDir}/frame_2.png" \
+        -i "${tempDir}/frame_3.png" \
+        -i "${tempDir}/frame_4.png" \
+        -filter_complex "[0][1]blend=all_mode=average[b1];[b1][2]blend=all_mode=average[b2];[b2][3]blend=all_mode=average[b3];[b3][4]blend=all_mode=average,gblur=sigma=0.3[out]" \
+        -map "[out]" \
+        -q:v 2 \
+        "${outputPath}"`;
+      
+      console.log(`[FALLBACK] Blending ${frameCount} frames into ${output}...`);
+      await execAsync(blendCmd);
+      
+      // Clean up temp frames
+      try {
+        for (let i = 0; i < frameCount; i++) {
+          const framePath = `${tempDir}/frame_${i}.png`;
+          if (fs.existsSync(framePath)) {
+            fs.unlinkSync(framePath);
+          }
+        }
+        fs.rmdirSync(tempDir);
+      } catch (e) {
+        console.log(`[FALLBACK] Could not clean up temp frames: ${e.message}`);
+      }
       
       const outputStats = fs.statSync(outputPath);
       const sizeMB = (outputStats.size / (1024 * 1024)).toFixed(2);
-      console.log(`[FALLBACK] Generated ${output} (${sizeMB} MB)`);
+      console.log(`[FALLBACK] Generated blended ${output} (${sizeMB} MB)`);
       
     } catch (e) {
-      console.error(`[FALLBACK] Failed to generate ${output}:`, e.message);
+      console.error(`[FALLBACK] Failed to generate blended ${output}:`, e.message);
       
-      // If ffmpeg fails, try without blur filter
+      // Fallback: try simple single-frame capture
       try {
-        const simpleCommand = `ffmpeg -y -ss 2 -i "${videoPath}" -vframes 1 -q:v 2 "${outputPath}"`;
+        console.log(`[FALLBACK] Trying simple single-frame fallback for ${output}...`);
+        const simpleCommand = `ffmpeg -y -ss 2 -i "${videoPath}" -vframes 1 -vf "gblur=sigma=0.5" -q:v 2 "${outputPath}"`;
         await execAsync(simpleCommand);
-        console.log(`[FALLBACK] Generated ${output} (without blur)`);
+        console.log(`[FALLBACK] Generated simple ${output} (single frame with blur)`);
       } catch (e2) {
         console.error(`[FALLBACK] Simple generation also failed for ${output}:`, e2.message);
+      }
+      
+      // Clean up temp directory if it exists
+      try {
+        if (fs.existsSync(tempDir)) {
+          const files = fs.readdirSync(tempDir);
+          for (const file of files) {
+            fs.unlinkSync(`${tempDir}/${file}`);
+          }
+          fs.rmdirSync(tempDir);
+        }
+      } catch (cleanupErr) {
+        // Ignore cleanup errors
       }
     }
   }

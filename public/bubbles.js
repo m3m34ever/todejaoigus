@@ -1739,7 +1739,7 @@ document.addEventListener("DOMContentLoaded", () => {
       let videoLoopCount = 0;
       let initialStabilizationComplete = false;
       
-      const stabilizationDelay = isIOS ? 3000 : 0;
+      const stabilizationDelay = isIOS ? 2000 : 0;
       
       const enableResetHandler = () => {
         if (fallbackReady) {
@@ -1759,60 +1759,46 @@ document.addEventListener("DOMContentLoaded", () => {
         if (safariResetInProgress || bg.duration <= 0) return;
         
         const timeLeft = bg.duration - bg.currentTime;
-        const resetThreshold = isIOS ? 0.3 : 1.0;
+        const resetThreshold = 0.15; // Tighter threshold - trigger closer to end
         
         if (timeLeft <= resetThreshold) {
           safariResetInProgress = true;
           videoLoopCount++;
-          console.log(`[SAFARI] Reset triggered (loop #${videoLoopCount}) - video opacity to 0`);
           
+          // Hide video - blended canvas shows underneath as seamless bridge
           bg.style.opacity = "0";
+          bg.currentTime = 0;
           
-          if (isIOS) {
-            const onEnded = () => {
-              bg.removeEventListener('ended', onEnded);
-              bg.currentTime = 0;
-              
-              setTimeout(() => {
-                bg.style.opacity = "1";
-                console.log("[SAFARI iOS] Video restored - opacity to 1");
-                
-                if (bg.paused) {
-                  bg.play().catch(() => {});
-                }
-                
-                safariResetInProgress = false;
-              }, 150);
+          // Restore video as soon as it's ready to play
+          const restoreVideo = () => {
+            bg.style.opacity = "1";
+            if (bg.paused) {
+              bg.play().catch(() => {});
+            }
+            safariResetInProgress = false;
+          };
+          
+          // Check if video is ready immediately
+          if (bg.readyState >= 2) {
+            // Video buffer is ready - restore immediately with minimal delay
+            requestAnimationFrame(() => {
+              restoreVideo();
+            });
+          } else {
+            // Wait for video to be ready, but with a short timeout fallback
+            const onCanPlay = () => {
+              bg.removeEventListener('canplay', onCanPlay);
+              clearTimeout(fallbackTimeout);
+              restoreVideo();
             };
             
-            bg.addEventListener('ended', onEnded, { once: true });
+            bg.addEventListener('canplay', onCanPlay, { once: true });
             
-            setTimeout(() => {
-              if (safariResetInProgress) {
-                bg.removeEventListener('ended', onEnded);
-                bg.currentTime = 0;
-                bg.style.opacity = "1";
-                if (bg.paused) {
-                  bg.play().catch(() => {});
-                }
-                safariResetInProgress = false;
-                console.log("[SAFARI iOS] Fallback reset completed");
-              }
-            }, 500);
-            
-          } else {
-            bg.currentTime = 0;
-            
-            setTimeout(() => {
-              bg.style.opacity = "1";
-              console.log("[SAFARI] Video restored - opacity to 1");
-              
-              if (bg.paused) {
-                bg.play().catch(() => {});
-              }
-              
-              safariResetInProgress = false;
-            }, 100);
+            // Fallback timeout - restore after 50ms max even if not fully ready
+            const fallbackTimeout = setTimeout(() => {
+              bg.removeEventListener('canplay', onCanPlay);
+              restoreVideo();
+            }, 50);
           }
         }
       };
