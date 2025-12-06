@@ -671,6 +671,11 @@ async function toggleCircleMode(force) {
       createShip(m, circle);
     });
 
+    if (bgVideo) {
+      bgVideo.pause();
+      bgVideo.style.display = "none";
+    }
+
     // start animation loop for circleShips
     if (!window._circleAnimating) {
       window._circleAnimating = true;
@@ -753,6 +758,10 @@ async function toggleCircleMode(force) {
       // fallback: ensure the main text input is visible if wrapper missing
       const t = document.getElementById("textInput");
       if (t) t.style.display = "";
+    }
+    if (bgVideo) {
+      bgVideo.style.display = "";
+      bgVideo.play().catch(()=>{});
     }
     // also ensure textInput is shown (defensive)
     const t2 = document.getElementById("textInput");
