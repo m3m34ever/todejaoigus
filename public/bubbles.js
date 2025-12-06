@@ -226,7 +226,10 @@ function createShip(msg, container = document.body) {
   div.style.position = "absolute";
   div.style.left = div.x + "px";
   div.style.top = div.y + "px";
-  
+
+  if (container !== document.body) {
+    div.style.zIndex = "10";  // Ships above videos (which are at 0-1)
+  }
   // For circle container, ensure container is positioned
   if (container !== document.body && getComputedStyle(container).position === "static") {
     container.style.position = "relative";
@@ -393,8 +396,13 @@ function createCircleOverlay() {
   videoContainer.id = "circleVideoContainer";
   videoContainer.style.width = "100%";
   videoContainer.style.height = "100%";
-  videoContainer.style.position = "relative";
+  videoContainer.style.position = "absolute";
+  videoContainer.style.top = "0";
+  videoContainer.style.left = "0";
+  videoContainer.style.zIndex = "0"; // behind ships
+  videoContainer.style.overflow = "hidden";
   circle.appendChild(videoContainer);
+
 
   overlay.addEventListener("click", (e) => e.stopPropagation());
   document.body.appendChild(overlay);
@@ -1683,7 +1691,7 @@ document.addEventListener("DOMContentLoaded", () => {
             this.secondaryVideo.load();
           }
           
-          // Determine if we're in circle mode (use positive z-indices)
+          // Determine if we're in circle mode (use positive z-indices, but keep them low)
           const inCircle = this.mainVideo.closest('#circleVideoContainer') !== null;
           const zBack = inCircle ? '0' : '-2';
           const zFront = inCircle ? '1' : '-1';
@@ -1745,7 +1753,7 @@ document.addEventListener("DOMContentLoaded", () => {
           this.switchInProgress = true;
           console.log('[DUAL VIDEO] Wave motion transition to main');
           
-          // Determine if we're in circle mode (use positive z-indices)
+          // Determine if we're in circle mode (use positive z-indices, but keep them low)
           const inCircle = this.mainVideo.closest('#circleVideoContainer') !== null;
           const zBack = inCircle ? '0' : '-2';
           const zFront = inCircle ? '1' : '-1';
