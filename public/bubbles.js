@@ -2289,6 +2289,42 @@ document.addEventListener("DOMContentLoaded", () => {
       setTimeout(initializeVideoSystem, 1000);
     }
     window.__setBgVideoVariant = (i) => { setBgVideoVariant(i, "manual"); };
+
+    setInterval(() => {
+      // Try to keep main video playing
+      const bgVideo = document.getElementById("bgVideo");
+      if (bgVideo && bgVideo.paused && !bgVideo.ended) {
+        bgVideo.play().catch(e => {
+          // Silently fail if browser blocks background playback
+        });
+      }
+      
+      // Try to keep secondary video playing (if dual video system is active)
+      const bgVideoSecondary = document.getElementById("bgVideoSecondary");
+      if (bgVideoSecondary && bgVideoSecondary.paused && !bgVideoSecondary.ended) {
+        bgVideoSecondary.play().catch(e => {
+          // Silently fail if browser blocks background playback
+        });
+      }
+    }, 1000);  // Check every 1 second
+
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) {
+        console.log('[VISIBILITY] Tab visible - resuming videos');
+        
+        // Resume main video
+        const bgVideo = document.getElementById("bgVideo");
+        if (bgVideo && bgVideo.paused) {
+          bgVideo.play().catch(e => console.warn('[VISIBILITY] Error resuming main video:', e));
+        }
+        
+        // Resume secondary video if dual video system is active
+        const bgVideoSecondary = document.getElementById("bgVideoSecondary");
+        if (bgVideoSecondary && bgVideoSecondary.paused) {
+          bgVideoSecondary.play().catch(e => console.warn('[VISIBILITY] Error resuming secondary video:', e));
+        }
+      }
+    });
     // ==================== GLOBAL CLEANUP ====================
     const cleanupHandler = () => {
       console.log('[CLEANUP] Page unloading, cleaning up video resources');
