@@ -1561,79 +1561,89 @@ document.addEventListener("DOMContentLoaded", () => {
       const startProgressiveFrameCollection = () => {
         if (frameCollectionComplete) return;
         
-        console.log("[SAFARI] Starting progressive frame collection (no seeking)");
+        // On iOS, wait longer before starting frame collection to avoid interfering with initial playback
+        const collectionDelay = isIOS ? 5000 : 0;
         
-        const targetFrameCount = 5;
-        const videoDuration = bg.duration || 10;
-        const frameInterval = videoDuration / targetFrameCount;
-        let lastCaptureTime = -frameInterval; // Allow immediate first capture
-        
-        const captureFrame = () => {
-          if (frameCollectionComplete || !bg || bg.paused || bg.readyState < 2) {
-            return;
-          }
-          
-          const currentTime = bg.currentTime;
-          
-          // Only capture if enough time has passed since last capture
-          if (currentTime - lastCaptureTime >= frameInterval || 
-              (currentTime < lastCaptureTime && collectedFrames.length < targetFrameCount)) {
-            
-            try {
-              const tempCanvas = document.createElement("canvas");
-              tempCanvas.width = bg.videoWidth;
-              tempCanvas.height = bg.videoHeight;
-              const tempCtx = tempCanvas.getContext("2d");
-              tempCtx.drawImage(bg, 0, 0);
-              
-              const frameData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
-              collectedFrames.push({
-                time: currentTime,
-                data: frameData
-              });
-              
-              lastCaptureTime = currentTime;
-              tempCanvas.remove();
-              
-              console.log(`[SAFARI] Captured frame ${collectedFrames.length}/${targetFrameCount} at ${currentTime.toFixed(2)}s`);
-              
-              // When we have enough frames, create the blended fallback
-              if (collectedFrames.length >= targetFrameCount) {
-                frameCollectionComplete = true;
-                createBlendedFallbackFromFrames();
-              }
-            } catch (e) {
-              console.error("[SAFARI] Frame capture error:", e);
-            }
-          }
-        };
-        
-        // Capture frames during timeupdate (no seeking required)
-        const frameCollectionHandler = () => {
-          if (!frameCollectionComplete) {
-            captureFrame();
-          }
-        };
-        
-        bg.addEventListener("timeupdate", frameCollectionHandler);
-        
-        // Also try to capture on video loop (when it resets to beginning)
-        bg.addEventListener("seeked", () => {
-          if (!frameCollectionComplete && bg.currentTime < 0.5) {
-            // Video looped back to start, good time to capture
-            setTimeout(captureFrame, 100);
-          }
-        });
-        
-        // Cleanup after collection is done or timeout
         setTimeout(() => {
-          if (!frameCollectionComplete && collectedFrames.length >= 3) {
-            console.log("[SAFARI] Frame collection timeout, using available frames");
-            frameCollectionComplete = true;
-            createBlendedFallbackFromFrames();
-          }
-          bg.removeEventListener("timeupdate", frameCollectionHandler);
-        }, 30000); // 30 second timeout
+          if (frameCollectionComplete) return;
+          
+          console.log("[SAFARI] Starting progressive frame collection (no seeking)");
+          
+          const targetFrameCount = 5;
+          const videoDuration = bg.duration || 10;
+          const frameInterval = videoDuration / targetFrameCount;
+          let lastCaptureTime = -frameInterval; // Allow immediate first capture
+          
+          const captureFrame = () => {
+            // Don't capture during reset
+            if (safariResetInProgress) return;
+            if (frameCollectionComplete || !bg || bg.paused || bg.readyState < 2) {
+              return;
+            }
+            
+            const currentTime = bg.currentTime;
+            
+            // Only capture if enough time has passed since last capture
+            if (currentTime - lastCaptureTime >= frameInterval || 
+                (currentTime < lastCaptureTime && collectedFrames.length < targetFrameCount)) {
+              
+              try {
+                const tempCanvas = document.createElement("canvas");
+                tempCanvas.width = bg.videoWidth;
+                tempCanvas.height = bg.videoHeight;
+                const tempCtx = tempCanvas.getContext("2d");
+                tempCtx.drawImage(bg, 0, 0);
+                
+                const frameData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+                collectedFrames.push({
+                  time: currentTime,
+                  data: frameData
+                });
+                
+                lastCaptureTime = currentTime;
+                tempCanvas.remove();
+                
+                console.log(`[SAFARI] Captured frame ${collectedFrames.length}/${targetFrameCount} at ${currentTime.toFixed(2)}s`);
+                
+                // When we have enough frames, create the blended fallback
+                if (collectedFrames.length >= targetFrameCount) {
+                  frameCollectionComplete = true;
+                  createBlendedFallbackFromFrames();
+                }
+              } catch (e) {
+                console.error("[SAFARI] Frame capture error:", e);
+              }
+            }
+          };
+          
+          // Capture frames during timeupdate (no seeking required)
+          const frameCollectionHandler = () => {
+            if (!frameCollectionComplete && !safariResetInProgress) {
+              captureFrame();
+            }
+          };
+          
+          bg.addEventListener("timeupdate", frameCollectionHandler);
+          
+          // Also try to capture on video loop (when it resets to beginning)
+          bg.addEventListener("seeked", () => {
+            if (!frameCollectionComplete && bg.currentTime < 0.5 && !safariResetInProgress) {
+              // Video looped back to start, good time to capture
+              setTimeout(captureFrame, 100);
+            }
+          });
+          
+          // Cleanup after collection is done or timeout
+          setTimeout(() => {
+            if (!frameCollectionComplete && collectedFrames.length >= 3) {
+              console.log("[SAFARI] Frame collection timeout, using available frames");
+              frameCollectionComplete = true;
+              createBlendedFallbackFromFrames();
+            }
+            bg.removeEventListener("timeupdate", frameCollectionHandler);
+          }, 30000); // 30 second timeout
+          
+        }, collectionDelay);
       };
       
       // Create blended fallback from collected frames (no seeking involved)
@@ -1727,29 +1737,85 @@ document.addEventListener("DOMContentLoaded", () => {
       bg.addEventListener("canplay", generateFallbackImmediately);
       
       // Safari reset handler
+      let videoLoopCount = 0;
+      let initialStabilizationComplete = false;
+      
+      // On iOS, wait for video to stabilize before enabling reset handler
+      const stabilizationDelay = isIOS ? 3000 : 0;
+      setTimeout(() => {
+        initialStabilizationComplete = true;
+        console.log("[SAFARI] Initial stabilization complete, reset handler enabled");
+      }, stabilizationDelay);
+      
       const safariResetHandler = () => {
+        // Skip if not stabilized yet (iOS needs time to buffer)
+        if (!initialStabilizationComplete) return;
         if (safariResetInProgress || bg.duration <= 0) return;
         
         const timeLeft = bg.duration - bg.currentTime;
         
-        if (timeLeft <= 1.0) {
+        // Use different threshold for iOS vs macOS
+        const resetThreshold = isIOS ? 0.3 : 1.0;
+        
+        if (timeLeft <= resetThreshold) {
           safariResetInProgress = true;
-          console.log("[SAFARI] Reset triggered - video opacity to 0");
+          videoLoopCount++;
+          console.log(`[SAFARI] Reset triggered (loop #${videoLoopCount}) - video opacity to 0`);
           
           // Hide video - canvas shows underneath
           bg.style.opacity = "0";
-          bg.currentTime = 0;
           
-          setTimeout(() => {
-            bg.style.opacity = "1";
-            console.log("[SAFARI] Video restored - opacity to 1");
+          // On iOS, use a gentler approach - let video naturally end then restart
+          if (isIOS) {
+            // Wait for video to actually end
+            const onEnded = () => {
+              bg.removeEventListener('ended', onEnded);
+              bg.currentTime = 0;
+              
+              // Longer delay for iOS to let the seek complete
+              setTimeout(() => {
+                bg.style.opacity = "1";
+                console.log("[SAFARI iOS] Video restored - opacity to 1");
+                
+                if (bg.paused) {
+                  bg.play().catch(() => {});
+                }
+                
+                safariResetInProgress = false;
+              }, 150);
+            };
             
-            if (bg.paused) {
-              bg.play().catch(() => {});
-            }
+            bg.addEventListener('ended', onEnded, { once: true });
             
-            safariResetInProgress = false;
-          }, 100);
+            // Fallback timeout in case 'ended' doesn't fire
+            setTimeout(() => {
+              if (safariResetInProgress) {
+                bg.removeEventListener('ended', onEnded);
+                bg.currentTime = 0;
+                bg.style.opacity = "1";
+                if (bg.paused) {
+                  bg.play().catch(() => {});
+                }
+                safariResetInProgress = false;
+                console.log("[SAFARI iOS] Fallback reset completed");
+              }
+            }, 500);
+            
+          } else {
+            // macOS Safari - original behavior
+            bg.currentTime = 0;
+            
+            setTimeout(() => {
+              bg.style.opacity = "1";
+              console.log("[SAFARI] Video restored - opacity to 1");
+              
+              if (bg.paused) {
+                bg.play().catch(() => {});
+              }
+              
+              safariResetInProgress = false;
+            }, 100);
+          }
         }
       };
       
