@@ -352,6 +352,9 @@ function showOverlay(text){
 let _originalVideoParent = null;
 let _originalVideoNextSibling = null;
 let _originalVideoStyles = null;
+let _originalSecondaryVideoParent = null;
+let _originalSecondaryVideoNextSibling = null;
+let _originalSecondaryVideoStyles = null;
 
 function createCircleOverlay() {
   if (circleOverlayEl) return circleOverlayEl;
@@ -554,6 +557,7 @@ async function toggleCircleMode(force) {
   const shouldActivate = (typeof force === "boolean") ? force : !isActive;
   const inputBox = document.getElementById("inputBox");
   const bgVideo = document.getElementById("bgVideo");
+  const bgVideoSecondary = document.getElementById("bgVideoSecondary");
 
   if (shouldActivate) {
 
@@ -610,38 +614,71 @@ async function toggleCircleMode(force) {
       createShip(m, circle);
     });
 
-    if (bgVideo) {
-      // save original position info for restoration
+    const videoContainer = circle.querySelector("#circleVideoContainer");
+
+    if (bgVideo && videoContainer) {
+      // Save original position info for restoration
       _originalVideoParent = bgVideo.parentNode;
       _originalVideoNextSibling = bgVideo.nextSibling;
       _originalVideoStyles = {
         position: bgVideo.style.position,
         inset: bgVideo.style.inset,
+        top: bgVideo.style.top,
+        left: bgVideo.style.left,
         width: bgVideo.style.width,
         height: bgVideo.style.height,
         objectFit: bgVideo.style.objectFit,
         zIndex: bgVideo.style.zIndex
       };
       
-      const videoContainer = circle.querySelector("#circleVideoContainer");
-      if (videoContainer) {
-        // Restyle video for circle display
-        bgVideo.style.position = "relative";
-        bgVideo.style.inset = "auto";
-        bgVideo.style.width = "100%";
-        bgVideo.style.height = "100%";
-        bgVideo.style.objectFit = "cover";
-        bgVideo.style.zIndex = "auto";
-        
-        videoContainer.appendChild(bgVideo);
-        
-        // Ensure video keeps playing
-        if (bgVideo.paused) {
-          bgVideo.play().catch(() => {});
-        }
-        
-        console.log("[CIRCLE] Moved background video into circle (single video element)");
+      // Restyle main video for circle display
+      bgVideo.style.position = "absolute";
+      bgVideo.style.inset = "0";
+      bgVideo.style.top = "0";
+      bgVideo.style.left = "0";
+      bgVideo.style.width = "100%";
+      bgVideo.style.height = "100%";
+      bgVideo.style.objectFit = "cover";
+      bgVideo.style.zIndex = "1";      
+      
+      videoContainer.appendChild(bgVideo);
+      
+      // Ensure video keeps playing
+      if (bgVideo.paused) {
+        bgVideo.play().catch(() => {});
       }
+      
+      console.log("[CIRCLE] Moved main video into circle");
+    }
+    
+    // Move SECONDARY video into circle (if dual video system is active)
+    if (bgVideoSecondary && videoContainer) {
+      _originalSecondaryVideoParent = bgVideoSecondary.parentNode;
+      _originalSecondaryVideoNextSibling = bgVideoSecondary.nextSibling;
+      _originalSecondaryVideoStyles = {
+        position: bgVideoSecondary.style.position,
+        inset: bgVideoSecondary.style.inset,
+        top: bgVideoSecondary.style.top,
+        left: bgVideoSecondary.style.left,
+        width: bgVideoSecondary.style.width,
+        height: bgVideoSecondary.style.height,
+        objectFit: bgVideoSecondary.style.objectFit,
+        zIndex: bgVideoSecondary.style.zIndex
+      };
+      
+      // Restyle secondary video for circle display
+      bgVideoSecondary.style.position = "absolute";
+      bgVideoSecondary.style.inset = "0";
+      bgVideoSecondary.style.top = "0";
+      bgVideoSecondary.style.left = "0";
+      bgVideoSecondary.style.width = "100%";
+      bgVideoSecondary.style.height = "100%";
+      bgVideoSecondary.style.objectFit = "cover";
+      bgVideoSecondary.style.zIndex = "0";      
+
+      videoContainer.appendChild(bgVideoSecondary);
+      
+      console.log("[CIRCLE] Moved secondary video into circle - dual video system continues!");
     }
 
     // start animation loop for circleShips
@@ -704,6 +741,8 @@ async function toggleCircleMode(force) {
       if (_originalVideoStyles) {
         bgVideo.style.position = _originalVideoStyles.position || "fixed";
         bgVideo.style.inset = _originalVideoStyles.inset || "0";
+        bgVideo.style.top = _originalVideoStyles.top || "0";
+        bgVideo.style.left = _originalVideoStyles.left || "0";
         bgVideo.style.width = _originalVideoStyles.width || "100vw";
         bgVideo.style.height = _originalVideoStyles.height || "100dvh";
         bgVideo.style.objectFit = _originalVideoStyles.objectFit || "cover";
@@ -736,6 +775,42 @@ async function toggleCircleMode(force) {
       _originalVideoStyles = null;
     }
 
+    const bgVideoSecondaryNow = document.getElementById("bgVideoSecondary");
+    if (bgVideoSecondaryNow && _originalSecondaryVideoParent) {
+      // Restore original styles
+      if (_originalSecondaryVideoStyles) {
+        bgVideoSecondaryNow.style.position = _originalSecondaryVideoStyles.position || "fixed";
+        bgVideoSecondaryNow.style.inset = _originalSecondaryVideoStyles.inset || "";
+        bgVideoSecondaryNow.style.top = _originalSecondaryVideoStyles.top || "0";
+        bgVideoSecondaryNow.style.left = _originalSecondaryVideoStyles.left || "0";
+        bgVideoSecondaryNow.style.width = _originalSecondaryVideoStyles.width || "100vw";
+        bgVideoSecondaryNow.style.height = _originalSecondaryVideoStyles.height || "100vh";
+        bgVideoSecondaryNow.style.objectFit = _originalSecondaryVideoStyles.objectFit || "cover";
+        bgVideoSecondaryNow.style.zIndex = _originalSecondaryVideoStyles.zIndex || "-1";
+      } else {
+        // Fallback to default styles
+        bgVideoSecondaryNow.style.position = "fixed";
+        bgVideoSecondaryNow.style.top = "0";
+        bgVideoSecondaryNow.style.left = "0";
+        bgVideoSecondaryNow.style.width = "100vw";
+        bgVideoSecondaryNow.style.height = "100vh";
+        bgVideoSecondaryNow.style.objectFit = "cover";
+        bgVideoSecondaryNow.style.zIndex = "-1";
+      }
+      
+      if (_originalSecondaryVideoNextSibling && _originalSecondaryVideoNextSibling.parentNode === _originalSecondaryVideoParent) {
+        _originalSecondaryVideoParent.insertBefore(bgVideoSecondaryNow, _originalSecondaryVideoNextSibling);
+      } else {
+        _originalSecondaryVideoParent.appendChild(bgVideoSecondaryNow);
+      }
+      
+      console.log("[CIRCLE] Moved secondary video back to original position");
+      
+      _originalSecondaryVideoParent = null;
+      _originalSecondaryVideoNextSibling = null;
+      _originalSecondaryVideoStyles = null;
+    }
+
     // remove circle ships and stop animation
     for (const s of circleShips) if (s && s.remove) s.remove();
     circleShips = [];
@@ -744,26 +819,21 @@ async function toggleCircleMode(force) {
     // restore original ships and input UI
     for (const s of ships) s.style.display = "";
     if (inputBox) {
-      // If we saved an explicit non-"none" display value, restore it.
-      // Otherwise fall back to empty string to allow CSS to show it.
       inputBox.style.display = (_savedInputDisplay && _savedInputDisplay !== "none")
         ? _savedInputDisplay
         : "";
       _savedInputDisplay = null;
     } else {
-      // fallback: ensure the main text input is visible if wrapper missing
       const t = document.getElementById("textInput");
       if (t) t.style.display = "";
     }
     
-    // also ensure textInput is shown (defensive)
     const t2 = document.getElementById("textInput");
     if (t2) t2.style.display = "";
     disableCursorAutoHide();
     el.classList.remove("active");
   }
 }
-// ...existing code...
 
 document.addEventListener('keydown', (e) => {
   // Accept Ctrl+Q on Windows/Linux, Cmd+Q on macOS (avoid OS quit on mac if possible)
@@ -1613,6 +1683,11 @@ document.addEventListener("DOMContentLoaded", () => {
             this.secondaryVideo.load();
           }
           
+          // Determine if we're in circle mode (use positive z-indices)
+          const inCircle = this.mainVideo.closest('#circleVideoContainer') !== null;
+          const zBack = inCircle ? '0' : '-2';
+          const zFront = inCircle ? '1' : '-1';
+          
           // Start secondary video from beginning
           this.secondaryVideo.currentTime = 0;
           this.secondaryVideo.play().then(() => {
@@ -1622,10 +1697,10 @@ document.addEventListener("DOMContentLoaded", () => {
             // Step 1: Secondary starts playing at full opacity underneath
             this.secondaryVideo.style.mixBlendMode = 'normal';
             this.secondaryVideo.style.opacity = '1';
-            this.secondaryVideo.style.zIndex = '-2'; // Behind main video
+            this.secondaryVideo.style.zIndex = zBack; // Behind main video
             
             // Step 2: Main video stays on top but gradually becomes transparent
-            this.mainVideo.style.zIndex = '-1'; // On top of secondary
+            this.mainVideo.style.zIndex = zFront; // On top of secondary
             
             // Step 3: Quick fade out of main video (secondary waves visible underneath)
             let progress = 0;
@@ -1647,7 +1722,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 this.mainVideo.pause();
                 
                 // Reset z-indices for next transition
-                this.secondaryVideo.style.zIndex = this.mainVideo.style.zIndex || '-1';
+                this.secondaryVideo.style.zIndex = zFront;
                 
                 this.currentActive = 'secondary';
                 this.switchInProgress = false;
@@ -1670,6 +1745,11 @@ document.addEventListener("DOMContentLoaded", () => {
           this.switchInProgress = true;
           console.log('[DUAL VIDEO] Wave motion transition to main');
           
+          // Determine if we're in circle mode (use positive z-indices)
+          const inCircle = this.mainVideo.closest('#circleVideoContainer') !== null;
+          const zBack = inCircle ? '0' : '-2';
+          const zFront = inCircle ? '1' : '-1';
+          
           // Start main video from beginning
           this.mainVideo.currentTime = 0;
           this.mainVideo.play().then(() => {
@@ -1679,10 +1759,10 @@ document.addEventListener("DOMContentLoaded", () => {
             // Step 1: Main starts playing at full opacity underneath
             this.mainVideo.style.mixBlendMode = 'normal';
             this.mainVideo.style.opacity = '1';
-            this.mainVideo.style.zIndex = '-2'; // Behind secondary video
+            this.mainVideo.style.zIndex = zBack; // Behind secondary video
             
             // Step 2: Secondary video stays on top but gradually becomes transparent
-            this.secondaryVideo.style.zIndex = '-1'; // On top of main
+            this.secondaryVideo.style.zIndex = zFront; // On top of main
             
             // Step 3: Quick fade out of secondary video (main waves visible underneath)
             let progress = 0;
@@ -1704,7 +1784,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 this.secondaryVideo.pause();
                 
                 // Reset z-indices for next transition
-                this.mainVideo.style.zIndex = this.secondaryVideo.style.zIndex || '-1';
+                this.mainVideo.style.zIndex = zFront;
                 
                 this.currentActive = 'main';
                 this.switchInProgress = false;
