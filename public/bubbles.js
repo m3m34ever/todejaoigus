@@ -57,6 +57,22 @@ async function preloadSoundFully() {
     } catch (e2) { /* ignore */ }
   }
 }
+let _audioContext = null;
+let _soundEnableBtn = null;
+
+async function ensureAudioContextResumed() {
+  try {
+    if (!_audioContext) {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtx) _audioContext = new AudioCtx();
+    }
+    if (_audioContext && _audioContext.state === 'suspended') {
+      await _audioContext.resume();
+    }
+  } catch (e) {
+    // ignore
+  }
+}
 
 function playSound(force = false) {
   if (!soundPreloaded) preloadSoundFully().catch(() => {});
@@ -72,6 +88,42 @@ function playSound(force = false) {
   }
 }
 
+function showSoundEnableHint(container = document.body) {
+  if (_soundEnableBtn) return;
+  const btn = document.createElement('button');
+  btn.id = 'sound-enable-btn';
+  btn.innerText = 'Enable sound';
+  btn.style.position = 'fixed';
+  btn.style.bottom = '20px';
+  btn.style.left = '50%';
+  btn.style.transform = 'translateX(-50%)';
+  btn.style.zIndex = 13000;
+  btn.style.padding = '8px 12px';
+  btn.style.borderRadius = '6px';
+  btn.style.background = 'rgba(0,0,0,0.7)';
+  btn.style.color = '#fff';
+  btn.style.border = '1px solid rgba(255,255,255,0.08)';
+  btn.style.cursor = 'pointer';
+  btn.onclick = async () => {
+    try {
+      await ensureAudioContextResumed();
+      if (streamingAudio) {
+        await streamingAudio.play().catch(()=>{});
+      }
+      if (soundAudio && soundPreloaded) {
+        await soundAudio.play().catch(()=>{});
+      }
+      // remove button on success
+      try { btn.remove(); } catch (_) {}
+      _soundEnableBtn = null;
+    } catch (e) {
+      console.warn('[SOUND] enable gesture failed', e);
+    }
+  };
+  document.body.appendChild(btn);
+  _soundEnableBtn = btn;
+}
+
 async function startSoundStreamIfNeeded(force = false) {
   if (!adminMode && !(circleOverlayEl && circleOverlayEl.classList.contains("active")) && !force) return;
   if (soundPreloaded && soundAudio) {
@@ -85,53 +137,59 @@ async function startSoundStreamIfNeeded(force = false) {
   }
 
   try {
+    // create streamingAudio but DO NOT fetch blob until needed (Audio() will stream)
     streamingAudio = new Audio("/heli.mp3");
     streamingAudio.preload = 'auto';
     streamingAudio.loop = true;
     streamingAudio.muted = false;
     streamingAudio.volume = 1.0;
-    streamingAudio.play().catch((err) => {
-      console.error("[SOUND STREAM] Play rejected", err);
+
+    // try to resume audio context first (improves chance)
+    await ensureAudioContextResumed();
+
+    // attempt to play immediately
+    await streamingAudio.play().catch(err => {
+      console.warn("[SOUND STREAM] Play rejected", err);
+      // show an enable hint when autoplay is blocked
+      if (circleOverlayEl && circleOverlayEl.classList.contains("active")) {
+        showSoundEnableHint(circleOverlayEl);
+      } else {
+        showSoundEnableHint();
+      }
     });
-    console.log("[SOUND STREAM] Started streaming audio fallback.");
+
+    console.log("[SOUND STREAM] Started streaming audio fallback (or pending user gesture).");
   } catch (e) {
     console.error("[SOUND STREAM] Exception starting streaming audio:", e);
     streamingAudio = null;
   }
 
+  // continue with preload+swap flow as before
   try {
     await preloadSoundFully();
     if (soundBlobUrl && streamingAudio) {
       soundSwitching = true;
       try {
         const currentTime = Math.max(0, streamingAudio.currentTime || 0);
-        // create new blob-based audio if not already
         if (!soundAudio || soundAudio.src !== soundBlobUrl) {
-          if (soundAudio) {
-            try { soundAudio.pause(); } catch (e) {}
-            soundAudio.src = soundBlobUrl;
-          } else {
-            soundAudio = new Audio(soundBlobUrl);
-          }
+          if (soundAudio) { try { soundAudio.pause(); } catch(e){}; soundAudio.src = soundBlobUrl; }
+          else soundAudio = new Audio(soundBlobUrl);
           soundAudio.loop = true;
           soundAudio.preload = "auto";
           soundAudio.volume = streamingAudio.volume || 1.0;
         }
-        // sync time and start blob audio, then stop streaming
-        try {
-          soundAudio.currentTime = Math.min(currentTime, (soundAudio.duration || Infinity));
-        } catch (e) { /* some browsers may throw if not ready */ }
+        try { soundAudio.currentTime = Math.min(currentTime, (soundAudio.duration || Infinity)); } catch (e) {}
+        await ensureAudioContextResumed();
         await soundAudio.play().catch((err)=>{ console.warn('[SOUNDSTREAM] blob play rejected:', err); });
-        // stop streaming
         try { streamingAudio.pause(); streamingAudio.src = ""; } catch (e) {}
         streamingAudio = null;
+        try { if (_soundEnableBtn) { _soundEnableBtn.remove(); _soundEnableBtn = null; } } catch(_) {}
         console.log("[SOUNDSTREAM] Switched from network stream to preloaded blob audio");
       } finally {
         soundSwitching = false;
       }
     } else if (soundPreloaded && soundAudio) {
-      // fallback: just play preloaded audio
-      try { playSound(); } catch (e) {}
+      try { await ensureAudioContextResumed(); playSound(); } catch (e) {}
     }
   } catch (e) {
     console.error("[SOUNDSTREAM] Preload+switch failed:", e);
