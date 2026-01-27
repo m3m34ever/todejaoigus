@@ -7,6 +7,7 @@ let _savedInputDisplay = null;
 let zResizeMode = false;
 let loopResetInProgress = false;
 
+
 let circleState = {
   sizeVmin: 100,    // initial circle size in vmin (matches CSS)
   left: null,      // px from left of viewport
@@ -22,6 +23,150 @@ const videoVariants = [
 
 const preloadedVideoBlobs = new Map();
 let preloadingComplete = false;
+
+let soundAudio = null;
+let soundBlobUrl = null;
+let soundPreloaded = false;
+let soundAdminEnabled = false;
+let streamingAudio = null;
+let soundSwitching = false;
+
+async function preloadSoundFully() {
+  if (soundPreloaded) return;
+  try {
+    const resp = await fetch("/heli.mp3", { cache: 'force-cache' }).catch(() => null);
+  if (resp && resp.ok) {
+    const blob = await resp.blob();
+    soundBlobUrl = URL.createObjectURL(blob);
+    soundAudio = new Audio(soundBlobUrl);
+  } else {
+    soundAudio = new Audio("/heli.mp3");
+  }
+  soundAudio.preload = 'auto';
+  soundAudio.loop = true;
+  soundAudio.volume = 1.0;
+  try { soundAudio.pause(); } catch (e) {}
+    soundPreloaded = true;
+    console.log("[SOUND PRELOAD] Sound preloaded and ready.");
+  } catch (e) {
+    console.error("[SOUND PRELOAD] Error preloading sound:", e);
+    try {
+      soundAudio = new Audio("/heli.mp3");
+      soundAudio.loop = true;
+      soundPreloaded = true;
+    } catch (e2) { /* ignore */ }
+  }
+}
+
+function playSound(force = false) {
+  if (!soundPreloaded) preloadSoundFully().catch(() => {});
+  if (!soundAudio) return;
+  try {
+    soundAudio.muted = false;
+    soundAudio.loop = true;
+    soundAudio.play().catch((err) => {
+      console.error("[SOUND PLAY] Play rejected", err);
+    });
+  } catch (e) {
+    console.error("[SOUND PLAY] Exception playing sound:", e);
+  }
+}
+
+async function startSoundStreamIfNeeded(force = false) {
+  if (!adminMode && !(circleOverlayEl && circleOverlayEl.classList.contains("active")) && !force) return;
+  if (soundPreloaded && soundAudio) {
+    try { playSound(); } catch (e) {}
+    return;
+  }
+  
+  if (streamingAudio || soundSwitching) {
+    try { streamingAudio && streamingAudio.play().catch(()=>{}); } catch(e){}
+    return;
+  }
+
+  try {
+    streamingAudio = new Audio("/heli.mp3");
+    streamingAudio.preload = 'auto';
+    streamingAudio.loop = true;
+    streamingAudio.muted = false;
+    streamingAudio.volume = 1.0;
+    streamingAudio.play().catch((err) => {
+      console.error("[SOUND STREAM] Play rejected", err);
+    });
+    console.log("[SOUND STREAM] Started streaming audio fallback.");
+  } catch (e) {
+    console.error("[SOUND STREAM] Exception starting streaming audio:", e);
+    streamingAudio = null;
+  }
+
+  try {
+    await preloadSoundFully();
+    if (soundBlobUrl && streamingAudio) {
+      soundSwitching = true;
+      try {
+        const currentTime = Math.max(0, streamingAudio.currentTime || 0);
+        // create new blob-based audio if not already
+        if (!soundAudio || soundAudio.src !== soundBlobUrl) {
+          if (soundAudio) {
+            try { soundAudio.pause(); } catch (e) {}
+            soundAudio.src = soundBlobUrl;
+          } else {
+            soundAudio = new Audio(soundBlobUrl);
+          }
+          soundAudio.loop = true;
+          soundAudio.preload = "auto";
+          soundAudio.volume = streamingAudio.volume || 1.0;
+        }
+        // sync time and start blob audio, then stop streaming
+        try {
+          soundAudio.currentTime = Math.min(currentTime, (soundAudio.duration || Infinity));
+        } catch (e) { /* some browsers may throw if not ready */ }
+        await soundAudio.play().catch((err)=>{ console.warn('[SOUNDSTREAM] blob play rejected:', err); });
+        // stop streaming
+        try { streamingAudio.pause(); streamingAudio.src = ""; } catch (e) {}
+        streamingAudio = null;
+        console.log("[SOUNDSTREAM] Switched from network stream to preloaded blob audio");
+      } finally {
+        soundSwitching = false;
+      }
+    } else if (soundPreloaded && soundAudio) {
+      // fallback: just play preloaded audio
+      try { playSound(); } catch (e) {}
+    }
+  } catch (e) {
+    console.error("[SOUNDSTREAM] Preload+switch failed:", e);
+  }
+}
+
+
+
+function stopSoundAll() {
+  try {
+    if (streamingAudio) {
+      try { streamingAudio.pause(); streamingAudio.src = ""; } catch (e) {}
+      streamingAudio = null;
+    }
+  } catch (e) {}
+  try {
+    if (soundAudio) {
+      try { soundAudio.pause(); soundAudio.currentTime = 0; } catch (e) {}
+    }
+  } catch (e) {}
+}
+
+window.addEventListener("beforeunload", () => {
+  try {
+    if (soundBlobUrl && soundBlobUrl.startsWith("blob:")) {
+      URL.revokeObjectURL(soundBlobUrl);
+      soundBlobUrl = null;
+    }
+    if (soundAudio) {
+      soundAudio.pause();
+      soundAudio.src = "";
+      soundAudio = null;
+    }
+  } catch (e) { /* ignore */ }
+});
 
 async function preloadVideoFully(src) {
   if (preloadedVideoBlobs.has(src)) {
@@ -708,6 +853,8 @@ async function toggleCircleMode(force) {
     if (typeof updateCircleStyles === "function") updateCircleStyles();
     enableCursorAutoHide();
 
+    try { startSoundStreamIfNeeded(); } catch (e) { console.warn('[SOUND] start request failed', e); }
+
     // hide original ships
     for (const s of ships) s.style.display = "none";
 
@@ -862,6 +1009,19 @@ async function toggleCircleMode(force) {
     }
     try { await exitPromise; } catch (_) { /* ignore */ }
 
+    try {
+      if (!soundAdminEnabled) {
+        stopSoundAll();
+      } else {
+        // if admin toggle left on, ensure preloaded blob plays (stop any streaming)
+        if (streamingAudio) {
+          try { streamingAudio.pause(); streamingAudio = null; } catch(e){}
+        }
+        if (soundPreloaded && soundAudio) {
+          try { playSound(); } catch(e){}
+        }
+      }
+    } catch (e) { console.warn('[SOUND] stop request failed', e); }
     if (bgVideo && _originalVideoParent) {
       // Restore original styles
       if (_originalVideoStyles) {
@@ -2809,6 +2969,9 @@ document.addEventListener("DOMContentLoaded", () => {
           document.body.classList.add("admin-mode");
           createAdminControls();
           checkBackupStatus();
+          try { startSoundStreamIfNeeded(true); } catch (e) { 
+            console.warn('[SOUNDSTREAM] start request failed', e); 
+          }
           alert("Admin mode activated. You can now right-click ships to delete them.");
         } else {
           alert("Incorrect password.");
@@ -2858,6 +3021,36 @@ function createAdminControls() {
   container.style.alignItems = "flex-end";
   container.style.gap = "8px"; 
   document.body.appendChild(container);
+
+  const soundBtn = document.createElement("button");
+  soundBtn.id = "admin-sound-button";
+  soundBtn.innerText = "Sound: OFF";
+  soundBtn.style.background = "#444";
+  soundBtn.style.color = "#fff";
+  soundBtn.style.border = "1px solid #222";
+  soundBtn.style.padding = "6px 10px";
+  soundBtn.style.borderRadius = "4px";
+  soundBtn.style.cursor = "pointer";
+  soundBtn.style.fontSize = "12px";
+  soundBtn.onclick = async () => {
+    soundAdminEnabled = !soundAdminEnabled;
+    if (soundAdminEnabled) {
+      soundBtn.innerText = "Sound: ON";
+      soundBtn.style.background = "#226622";
+      // If circle is active start streaming->blob flow, else preload only
+      if (circleOverlayEl && circleOverlayEl.classList.contains("active")) {
+        startSoundStreamIfNeeded(true);
+      } else {
+        try { await preloadSoundFully(); } catch (e) { console.warn('[SOUND] preload failed', e); }
+      }
+    } else {
+      soundBtn.innerText = "Sound: OFF";
+      soundBtn.style.background = "#444";
+      // stop any playing audio
+      stopSoundAll();
+    }
+  };
+  container.appendChild(soundBtn);
 
   const undoBtn = document.createElement("button");
   undoBtn.id = "admin-undo-button";
