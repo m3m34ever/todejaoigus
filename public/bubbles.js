@@ -196,7 +196,60 @@ async function startSoundStreamIfNeeded(force = false) {
   }
 }
 
+async function exportPlain() {
+  const r = await fetch('/api/admin/export', { method: 'POST', credentials: 'include' });
+  if (!r.ok) return alert('Export failed');
+  const blob = await r.blob();
+  triggerDownload(blob, r.headers.get('Content-Disposition')?.match(/filename="(.+)"/)?.[1] || 'snapshot.json');
+}
 
+async function exportEncrypted() {
+  const passphrase = prompt('Passphrase to encrypt with (min 8 chars):');
+  if (!passphrase || passphrase.length < 8) return;
+  const r = await fetch('/api/admin/export-encrypted', {
+    method: 'POST', credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ passphrase }),
+  });
+  if (!r.ok) return alert((await r.json()).error || 'Export failed');
+  triggerDownload(await r.blob(), 'snapshot.enc');
+}
+
+async function importPlain(file) {
+  const snapshot = JSON.parse(await file.text());
+  const r = await fetch('/api/admin/import', {
+    method: 'POST', credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ snapshot, mode: 'replace' }),
+  });
+  const d = await r.json();
+  alert(d.ok ? `Restored ${d.imported}, total ${d.total}` : `Failed: ${d.error}`);
+  if (d.ok) checkBackupStatus();
+}
+
+async function importEncrypted(file) {
+  const passphrase = prompt('Passphrase to decrypt:');
+  if (!passphrase) return;
+  const r = await fetch('/api/admin/import-encrypted', {
+    method: 'POST', credentials: 'include',
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'X-Snapshot-Passphrase': passphrase,
+    },
+    body: await file.arrayBuffer(),
+  });
+  const d = await r.json();
+  alert(d.ok ? `Restored ${d.restored}, total ${d.total}` : `Failed: ${d.error}`);
+  if (d.ok) checkBackupStatus();
+}
+
+function triggerDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
 
 function stopSoundAll() {
   try {
@@ -3053,9 +3106,16 @@ async function checkBackupStatus() {
       const undoBtn = document.getElementById("admin-undo-button");
       if (undoBtn && data.hasBackup) {
         undoBtn.style.display = "block";
-        // Optionally show backup info in button text
         const count = data.backupInfo?.messageCount || 0;
-        undoBtn.innerText = `Undo Clear All (${count} ships)`;
+        const action = data.backupInfo?.action || 'clear';
+        const labelMap = {
+          clear: `Undo Clear All (${count} ships)`,
+          import: `Undo Import (revert to ${count} ships)`,
+          'import-encrypted': `Undo Encrypted Import (revert to ${count} ships)`,
+        };
+        undoBtn.innerText = labelMap[action] || `Undo (${count} ships)`;
+      } else if (undoBtn) {
+        undoBtn.style.display = "none";   // hide if backup is gone
       }
     }
   } catch (err) {
@@ -3276,6 +3336,72 @@ function createAdminControls() {
     }
   };
   container.appendChild(allMsgsBtn);
+
+  const snapBtn = (id, label, bg, border, onclick) => {
+    const b = document.createElement("button");
+    b.id = id;
+    b.innerText = label;
+    b.style.background = bg;
+    b.style.color = "#fff";
+    b.style.border = `1px solid ${border}`;
+    b.style.padding = "6px 10px";
+    b.style.borderRadius = "4px";
+    b.style.cursor = "pointer";
+    b.style.fontSize = "12px";
+    b.onclick = onclick;
+    return b;
+  };
+
+  const importFileInput = document.createElement("input");
+  importFileInput.type = "file";
+  importFileInput.id = "admin-import-input";
+  importFileInput.style.display = "none";
+  container.appendChild(importFileInput);
+
+  container.appendChild(snapBtn(
+    "admin-export-plain",
+    "Export (plain)",
+    "#225522", "#113311",
+    exportPlain
+  ));
+
+  container.appendChild(snapBtn(
+    "admin-export-encrypted",
+    "Export (encrypted)",
+    "#552288", "#331155",
+    exportEncrypted
+  ));
+
+
+  container.appendChild(snapBtn(
+    "admin-import-plain",
+    "Import (plain JSON)",
+    "#225588", "#113355",
+    () => {
+      importFileInput.accept = "application/json,.json";
+      importFileInput.onchange = (e) => {
+        const f = e.target.files?.[0];
+        if (f) importPlain(f);
+        importFileInput.value = "";
+      };
+      importFileInput.click();
+    }
+  ));
+
+  container.appendChild(snapBtn(
+    "admin-import-encrypted",
+    "Import (encrypted .enc)",
+    "#882222", "#551111",
+    () => {
+    importFileInput.accept = ".enc,application/octet-stream";
+    importFileInput.onchange = (e) => {
+      const f = e.target.files?.[0];
+      if (f) importEncrypted(f);
+      importFileInput.value = "";
+    };
+    importFileInput.click();
+  }
+));
 
   // collapsible panel
   const panel = document.createElement("div");

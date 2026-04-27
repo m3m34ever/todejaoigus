@@ -13,8 +13,42 @@ import crypto from 'crypto';
 import FileStore from 'session-file-store';
 import { exec } from "child_process";
 import { promisify } from "util";
+import { count } from "console";
 
 dotenv.config();
+
+const SNAPSHOT_FILE = process.env.SNAPSHOT_FILE || './snapshot.enc';
+
+function deriveKey(passphrase, salt) {
+  return crypto.scryptSync(String(passphrase), salt, 32, { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
+}
+
+function encryptWithPassphrase(plaintextBuffer, passphrase) {
+  if (!passphrase || typeof passphrase !== 'string' || passphrase.length < 8) {
+    throw new Error('passphrase missing or too short (min 8 chars)');
+  }
+  const salt = crypto.randomBytes(16);
+  const iv = crypto.randomBytes(12);
+  const key = deriveKey(passphrase, salt);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const ct = Buffer.concat([cipher.update(plaintextBuffer), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return Buffer.concat([salt, iv, tag, ct]);
+}
+
+function decryptWithPassphrase(blob, passphrase) {
+  if (!passphrase) throw new Error('passphrase missing');
+  if (blob.length < 44) throw new Error('snapshot file too short to be valid, might be corrupted');
+  const salt = blob.subarray(0, 16);
+  const iv = blob.subarray(16, 28);
+  const tag = blob.subarray(28, 44);
+  const ct = blob.subarray(44);
+  const key = deriveKey(passphrase, salt);
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(ct), decipher.final()]);
+}
+
 
 const NOTIFY_LIST = (process.env.NOTIFY_LIST || "").split(",").map(s => s.trim()).filter(Boolean); // recipients
 const EMAIL_FROM = process.env.EMAIL_FROM || `no-reply@${process.env.DOMAIN || "example.com"}`;
@@ -240,14 +274,50 @@ function clearBackup() {
   }
 }
 
+function loadFromGitSnapshot() {
+  if (!fs.existsSync(SNAPSHOT_FILE)) {
+    console.log('[STATE] no snapshot.enc in repo');
+    return null;
+  }
+  const passphrase = process.env.SNAPSHOT_PASSPHRASE;
+  if (!passphrase) {
+    console.log('[STATE] snapshot.enc present but SNAPSHOT_PASSPHRASE env variable not set, skipping load');
+    return null;
+  }
+  try {
+    const blob = fs.readFileSync(SNAPSHOT_FILE);
+    const plain = decryptWithPassphrase(blob, passphrase);
+    const data = JSON.parse(plain.toString('utf-8'));
+    if (!Array.isArray(data?.messages)) {
+      console.error('[STATE] invalid snapshot format, missing messages array');
+      return null;
+    }
+    return data;
+  } catch (err) {
+    console.error('[STATE] failed to load snapshot:', err.message);
+    return null;
+  }
+}
+
 try {
   if (fs.existsSync(STATE_FILE)) {
     const raw = fs.readFileSync(STATE_FILE, "utf-8");
     messages = raw ? JSON.parse(raw) : [];
+    console.log(`[STATE] Loaded ${messages.length} messages from ${STATE_FILE}`);
+  } else {
+    const snap = loadFromGitSnapshot();
+    if (snap) {
+      messages = snap.messages;
+      saveState();
+      console.log(`[STATE] auto-restored ${messages.length} messages from snapshot.enc (exported ${snap.exportedAt || 'unknown'})`);
+    } else {
+      console.log(`[STATE] no existing state file or valid snapshot found, starting with empty state`);
+    }
   } 
 } catch (err) {
   console.error("Error loading state file:", err);
 }
+
 // Save state to file - synchronous to avoid race conditions
 function saveState() {
   try {
@@ -364,7 +434,6 @@ io.on("connection", (socket) => {
       console.error("Error handling video quality change:", e);
     }
   });
-  
 });
 
 app.post("/api/admin/delete-ship", requireAdmin, (req, res) => {
@@ -414,7 +483,8 @@ app.post("/api/admin/clear-all", adminActionLimit, requireAdmin, (req, res) => {
     const backupData = {
       messages: [...messages], // deep copy
       timestamp: time,
-      clearedBy: ip || 'unknown'
+      clearedBy: ip || 'unknown',
+      action: "clear"
     };
     saveBackup(backupData);
 
@@ -433,8 +503,17 @@ app.post("/api/admin/clear-all", adminActionLimit, requireAdmin, (req, res) => {
     io.emit("clearAll");
     
     console.log(`[ADMIN] Cleared ${clearedCount} messages from ${ip || 'unknown'} (backup saved to disk)`);
-    res.json({ ok: true, cleared: clearedCount, backupAvailable: true });
-    
+    res.json({
+      ok: true,
+      hasBackup,
+      backupInfo: hasBackup ? {
+        messageCount: backupData.messages.length,
+        timestamp: backupData.timestamp,
+        action: backupData.action || 'clear',   // add this
+        clearedBy: backupData.clearedBy
+      } : null
+    });
+
   } catch (err) {
     console.error("Error in admin clear-all:", err);
     res.status(500).json({ ok: false, error: "internal_error" });
@@ -547,6 +626,148 @@ app.post("/api/admin/messages", requireAdmin, (req, res) => {
     res.status(500).json({ ok: false, error: "internal_error" });
   }
 });
+
+app.post("/api/admin/export", requireAdmin, (req, res) => {
+  try {
+    const ip = getIpFromReq(req);
+    const time = new Date().toISOString();
+    fs.appendFile(LOG_FILE, `[ADMIN EXPORT] [${time}] IP: ${ip || 'unknown'} - ${messages.length} messages\n`, (e) => { if (e) console.error(e); });
+    const payload = { version: 1, exportedAt: time, count: messages.length, messages };
+    const filename = `todejaoigus-${time.replace(/[:.]/g, '-')}.json`;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(JSON.stringify(payload, null, 2));
+  } catch (err) {
+    console.error("Error exporting messages:", err);
+    res.status(500).json({ ok: false, error: "internal_error" });
+  }
+});
+
+app.post("/api/admin/import", adminActionLimit, requireAdmin, (req, res) => {
+  try {
+    const ip = getIpFromReq(req);
+    const time = new Date().toISOString();
+    const { snapshot, mode = "replace" } = req.body || {};
+
+    if (!snapshot || !Array.isArray(snapshot.messages)) {
+      return res.status(400).json({ ok: false, error: "invalid_snapshot" });
+    }
+    const valid = snapshot.messages.every(m => m && typeof m.text === "string" && typeof m.time === "string");
+    if (!valid) return res.status(400).json({ ok: false, error: "malformed_messages" });
+
+    saveBackup({
+      messages: [...messages],
+      timestamp: time,
+      action: "import",
+      clearedBy: `import-by-${ip || 'unknown'}`
+    });
+
+    const incoming = snapshot.messages.map(m => ({
+      text: m.text, email: m.email || null, time: m.time, ip: m.ip || null
+    }));
+
+    if (mode === "merge") {
+      const seen = new Set(messages.map(m => `${m.time}|${m.text}`));
+      for (const m of incoming) {
+        const k = `${m.time}|${m.text}`;
+        if (!seen.has(k)) {
+          messages.push(m);
+          seen.add(k);
+        }
+      }
+    } else {
+      messages = incoming;
+    }
+    messages.sort((a, b) => a.time.localeCompare(b.time));
+
+    saveState();
+    fs.appendFile(LOG_FILE, `[ADMIN IMPORT] [${time}] IP: ${ip || 'unknown'} - mode=${mode}, ${incoming.length} in, total ${messages.length}\n`, (e) => { if (e) console.error(e); });
+    io.emit("restoreAll", messages.map(m => ({ text: m.text, time: m.time, hasEmail: !!m.email })));
+
+    res.json({ ok: true, mode, imported: incoming.length, total: messages.length });
+  } catch (err) {
+    console.error("Error in admin import:", err);
+    res.status(500).json({ ok: false, error: "internal_error" });
+  }
+});
+
+app.post("/api/admin/export-encrypted", adminActionLimit, requireAdmin, (req, res) => {
+  try {
+    const ip = getIpFromReq(req);
+    const time = new Date().toISOString();
+    const passphrase = req.body?.passphrase;
+
+    if (!passphrase) {
+      return res.status(400).json({ ok: false, error: "passphrase_required" });
+    }
+
+    const payload = JSON.stringify({ version: 1, exportedAt: time, count: messages.length, messages });
+    const blob = encryptWithPassphrase(Buffer.from(payload, 'utf8'), passphrase);
+
+    fs.appendFile(LOG_FILE, `[ADMIN EXPORT-ENC] [${time}] IP: ${ip || 'unknown'} - ${messages.length} messages, ${blob.length} bytes\n`, (e) => { if (e) console.error(e); });
+
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', 'attachment; filename="snapshot.enc"');
+    res.send(blob);
+  } catch (err) {
+    console.error("Error in encrypted export:", err);
+    res.status(400).json({ ok: false, error: err.message || "internal_error" });
+  }
+});
+
+app.post("/api/admin/import-encrypted",
+  adminActionLimit,
+  requireAdmin,
+  express.raw({ type: 'application/octet-stream', limit: '50mb' }),
+  (req, res) => {
+    try {
+      const ip = getIpFromReq(req);
+      const time = new Date().toISOString();
+      const passphrase = req.headers['x-snapshot-passphrase'];
+      const mode = req.query.mode === 'merge' ? 'merge' : 'replace';
+
+      if (!passphrase) return res.status(400).json({ ok: false, error: "passphrase_required" });
+      if (!Buffer.isBuffer(req.body) || req.body.length < 44) {
+        return res.status(400).json({ ok: false, error: "missing_or_short_body" });
+      }
+
+      const plain = decryptWithPassphrase(req.body, passphrase);
+      const data = JSON.parse(plain.toString('utf8'));
+      if (!Array.isArray(data?.messages)) return res.status(400).json({ ok: false, error: "invalid_payload" });
+
+      saveBackup({
+        messages: [...messages],
+        timestamp: time,
+        action: "import-encrypted",
+        clearedBy: `enc-import-by-${ip || 'unknown'}`
+      });
+
+      const incoming = data.messages.map(m => ({
+        text: m.text, email: m.email || null, time: m.time, ip: m.ip || null
+      }));
+
+      if (mode === 'replace') {
+        messages = incoming;
+      } else {
+        const seen = new Set(messages.map(m => `${m.time}|${m.text}`));
+        for (const m of incoming) {
+          const k = `${m.time}|${m.text}`;
+          if (!seen.has(k)) { messages.push(m); seen.add(k); }
+        }
+        messages.sort((a, b) => a.time.localeCompare(b.time));
+      }
+
+      saveState();
+      fs.appendFile(LOG_FILE, `[ADMIN IMPORT-ENC] [${time}] IP: ${ip || 'unknown'} - mode=${mode}, ${incoming.length} restored, total ${messages.length}\n`, (e) => { if (e) console.error(e); });
+      io.emit("restoreAll", messages.map(m => ({ text: m.text, time: m.time, hasEmail: !!m.email })));
+
+      res.json({ ok: true, mode, restored: incoming.length, total: messages.length });
+    } catch (err) {
+      console.error("Error in encrypted import:", err);
+      res.status(400).json({ ok: false, error: err.message || "decrypt_failed" });
+    }
+  }
+);
 
 function isRateLimited(ip) {
   if (!ip) return false;
